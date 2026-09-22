@@ -32,10 +32,12 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.HexFormat;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -58,7 +60,7 @@ public class FlowExtractor {
 
     private final Path srcRoot;
     private final JavaParser parser;
-    private final DefaultPrettyPrinter bodyPrinter = new DefaultPrettyPrinter(new DefaultPrinterConfiguration()
+    private final DefaultPrettyPrinter declarationPrinter = new DefaultPrettyPrinter(new DefaultPrinterConfiguration()
             .removeOption(new DefaultConfigurationOption(ConfigOption.PRINT_COMMENTS))
             .removeOption(new DefaultConfigurationOption(ConfigOption.PRINT_JAVADOC)));
 
@@ -75,11 +77,16 @@ public class FlowExtractor {
         Map<String, Node> nodes = new HashMap<>();
         Set<Edge> edges = new HashSet<>();
         for (Path file : files) {
-            Optional<CompilationUnit> cu = parse(file);
+            Path abs = file.toAbsolutePath().normalize();
+            if (!abs.startsWith(srcRoot)) {
+                System.err.println("[flowdiffmap] 소스 루트 밖 · 건너뜀: " + file);
+                continue;
+            }
+            Optional<CompilationUnit> cu = parse(abs);
             if (cu.isEmpty()) {
                 continue;
             }
-            String rel = relative(file);
+            String rel = srcRoot.relativize(abs).toString().replace('\\', '/');
             for (ClassOrInterfaceDeclaration type : cu.get().findAll(ClassOrInterfaceDeclaration.class)) {
                 Layer layer = layerOf(type);
                 if (layer == null) {
@@ -87,23 +94,54 @@ public class FlowExtractor {
                 }
                 String fqn = type.getFullyQualifiedName().orElseThrow();
                 for (MethodDeclaration m : type.getMethods()) {
-                    if (layer == Layer.CONTROLLER ? mappingOf(m).isEmpty() : m.isPrivate()) {
+                    if (!isEntry(layer, m)) {
                         continue;
                     }
+                    List<MethodDeclaration> reach = withHelpers(type, layer, m);
                     String endpoint = layer == Layer.CONTROLLER ? endpointOf(type, m) : null;
                     Node node = new Node(idOf(fqn, m.getNameAsString(), m.getParameters().size()),
-                            fqn, m.getNameAsString(), layer, endpoint, hash(m), rel);
+                            fqn, m.getNameAsString(), layer, endpoint, hash(reach), rel);
                     nodes.put(node.id(), node);
-                    for (MethodCallExpr call : m.findAll(MethodCallExpr.class)) {
-                        calleeFqn(call)
-                                .filter(callee -> !callee.equals(fqn))
-                                .ifPresent(callee -> edges.add(new Edge(node.id(),
-                                        idOf(callee, call.getNameAsString(), call.getArguments().size()), rel)));
+                    for (MethodDeclaration r : reach) {
+                        for (MethodCallExpr call : r.findAll(MethodCallExpr.class)) {
+                            calleeFqn(call)
+                                    .filter(callee -> !callee.equals(fqn))
+                                    .ifPresent(callee -> edges.add(new Edge(node.id(),
+                                            idOf(callee, call.getNameAsString(), call.getArguments().size()), rel)));
+                        }
                     }
                 }
             }
         }
         return new Graph(nodes, edges);
+    }
+
+    /** 컨트롤러는 핸들러 메서드만 · 나머지는 private 이 아닌 메서드. */
+    private static boolean isEntry(Layer layer, MethodDeclaration m) {
+        return layer == Layer.CONTROLLER ? mappingOf(m).isPresent() : !m.isPrivate();
+    }
+
+    /**
+     * 엔트리 메서드와, 거기서 같은 클래스 안으로 부르는 헬퍼(엔트리가 아닌 메서드)들.
+     * 헬퍼를 거친 레이어 간 호출과 헬퍼 본문의 변경을 엔트리 노드 몫으로 돌린다.
+     */
+    private static List<MethodDeclaration> withHelpers(ClassOrInterfaceDeclaration type, Layer layer, MethodDeclaration entry) {
+        List<MethodDeclaration> reach = new ArrayList<>(List.of(entry));
+        for (int i = 0; i < reach.size(); i++) {
+            for (MethodCallExpr call : reach.get(i).findAll(MethodCallExpr.class)) {
+                if (call.getScope().isPresent() && !call.getScope().get().isThisExpr()) {
+                    continue;
+                }
+                for (MethodDeclaration helper : type.getMethodsByName(call.getNameAsString())) {
+                    if (helper.getParameters().size() == call.getArguments().size()
+                            && !isEntry(layer, helper)
+                            && reach.stream().noneMatch(seen -> seen == helper)) {
+                        reach.add(helper);
+                    }
+                }
+            }
+        }
+        return reach;
     }
 
     private Optional<CompilationUnit> parse(Path file) {
@@ -181,9 +219,12 @@ public class FlowExtractor {
     private static String verbOf(AnnotationExpr mapping) {
         String verb = VERBS.get(mapping.getName().getIdentifier());
         if (mapping instanceof NormalAnnotationExpr n) {
-            // @RequestMapping(method = RequestMethod.POST)
+            // @RequestMapping(method = RequestMethod.POST) · method = {GET, POST} 는 GET,POST
             verb = memberOf(n, "method")
-                    .map(v -> v.toString().substring(v.toString().lastIndexOf('.') + 1))
+                    .map(v -> v instanceof ArrayInitializerExpr array ? array.getValues() : List.of(v))
+                    .map(values -> String.join(",", values.stream()
+                            .map(v -> v.toString().substring(v.toString().lastIndexOf('.') + 1))
+                            .toList()))
                     .orElse(verb);
         }
         return verb;
@@ -208,18 +249,16 @@ public class FlowExtractor {
                 .findFirst();
     }
 
-    private String hash(MethodDeclaration m) {
-        String body = m.getBody().map(bodyPrinter::print).orElse("");
+    /** 주석을 뺀 선언 전체(어노테이션 · 시그니처 · 본문) — 본문 없는 쿼리 메서드의 {@code @Query} 변경도 잡는다. */
+    private String hash(List<MethodDeclaration> reach) {
+        StringBuilder printed = new StringBuilder();
+        reach.forEach(m -> printed.append(declarationPrinter.print(m)).append('\n'));
         try {
-            byte[] digest = MessageDigest.getInstance("SHA-256").digest(body.getBytes(StandardCharsets.UTF_8));
+            byte[] digest = MessageDigest.getInstance("SHA-256").digest(printed.toString().getBytes(StandardCharsets.UTF_8));
             return HexFormat.of().formatHex(digest);
         } catch (NoSuchAlgorithmException e) {
             throw new IllegalStateException(e);
         }
-    }
-
-    private String relative(Path file) {
-        return srcRoot.relativize(file.toAbsolutePath().normalize()).toString().replace('\\', '/');
     }
 
     private static String idOf(String fqn, String method, int arity) {

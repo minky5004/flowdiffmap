@@ -21,7 +21,11 @@ public class OrderService {
         if (order.getAmount() <= 0) {
             throw new IllegalArgumentException("amount");
         }
-        paymentRepository.charge(order);
+        pay(order);
         return orderRepository.save(order);
+    }
+
+    private void pay(Order order) {
+        paymentRepository.charge(order);
     }
 }
