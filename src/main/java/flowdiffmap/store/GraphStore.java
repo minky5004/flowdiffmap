@@ -14,9 +14,11 @@ import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Statement;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 
@@ -28,6 +30,11 @@ import java.util.Set;
  */
 public class GraphStore {
 
+    // 열 순서가 다른 옛 로컬 볼륨의 표에 값이 엇갈려 들어가지 않게 열 이름을 댄다
+    private static final String COMPONENT = "commit_sha, fqn, layer, file";
+    private static final String NODE = "commit_sha, id, fqn, method, layer, endpoint, body_hash, file";
+    private static final String EDGE = "commit_sha, from_id, to_id, file";
+
     private final String url;
     private final String user;
     private final String password;
@@ -36,14 +43,20 @@ public class GraphStore {
         this.url = url;
         this.user = user;
         this.password = password;
-        try (Connection c = connect(); InputStream schema = GraphStore.class.getResourceAsStream("/schema.sql")) {
-            c.createStatement().execute(new String(schema.readAllBytes(), StandardCharsets.UTF_8));
+        try (InputStream schema = Objects.requireNonNull(GraphStore.class.getResourceAsStream("/schema.sql"), "schema.sql 없음");
+             Connection c = connect();
+             Statement st = c.createStatement()) {
+            st.execute(new String(schema.readAllBytes(), StandardCharsets.UTF_8));
         } catch (IOException e) {
             throw new IllegalStateException("schema.sql 읽기 실패", e);
         }
     }
 
-    /** 엣지만 있고 선언이 없는 callee(상속 메서드)는 callee 컴포넌트의 레이어로 암묵 노드를 채운다. */
+    /**
+     * 엣지는 callee 가 이 커밋의 컴포넌트인 것만 남긴다 — 저장은 소스 안 모든 클래스로의 호출을 두어서,
+     * callee 파일만 바뀌어 컴포넌트가 되거나 그만두어도 안 바뀐 호출자 쪽 엣지가 맞게 읽힌다.
+     * 엣지만 있고 선언이 없는 callee(상속 메서드)는 callee 컴포넌트의 레이어로 암묵 노드를 채운다.
+     */
     public Optional<Graph> load(String sha) throws SQLException {
         try (Connection c = connect()) {
             if (!exists(c, sha)) {
@@ -65,13 +78,15 @@ public class GraphStore {
             Set<Edge> edges = new HashSet<>();
             try (ResultSet r = query(c, "SELECT from_id, to_id, file FROM edge WHERE commit_sha = ?", sha)) {
                 while (r.next()) {
-                    edges.add(new Edge(r.getString(1), r.getString(2), r.getString(3)));
+                    Edge e = new Edge(r.getString(1), r.getString(2), r.getString(3));
+                    if (components.containsKey(fqnOf(e.to()))) {
+                        edges.add(e);
+                    }
                 }
             }
             for (Edge e : edges) {
-                // 저장 시 prune 이 컴포넌트가 아닌 callee 엣지를 지워 두어 callee 컴포넌트는 항상 있다
                 nodes.computeIfAbsent(e.to(), id -> {
-                    Component callee = components.get(id.substring(0, id.indexOf('#')));
+                    Component callee = components.get(fqnOf(id));
                     String method = id.substring(id.indexOf('#') + 1, id.lastIndexOf('/'));
                     return new Node(id, callee.fqn(), method, callee.layer(), null, "", callee.file());
                 });
@@ -88,21 +103,27 @@ public class GraphStore {
     /**
      * 부모 스냅샷에서 {@code touchedFiles}(변경 · 삭제) 소유 행을 뺀 나머지를 복사하고 {@code fresh} 를 더한다.
      * 한 트랜잭션 · 같은 {@code sha} 로 다시 부르면 덮어쓴다.
+     *
+     * @param parentSha    스냅샷이 있어야 한다 — 없으면 바뀐 파일만 담긴 스냅샷이 온전한 것처럼 남아서 예외
+     * @param touchedFiles {@link Node#file()} 과 같은 형식 — 소스 루트 기준 상대 경로 · {@code /} 구분
      */
     public void saveIncremental(String parentSha, String sha, Set<String> touchedFiles, Graph fresh) throws SQLException {
         try (Connection c = connect()) {
             c.setAutoCommit(false);
+            if (parentSha != null && !exists(c, parentSha)) {
+                throw new IllegalStateException("부모 스냅샷 없음: " + parentSha);
+            }
             for (String table : new String[] {"snapshot", "component", "node", "edge"}) {
                 update(c, "DELETE FROM " + table + " WHERE commit_sha = ?", sha);
             }
-            update(c, "INSERT INTO snapshot VALUES (?)", sha);
+            update(c, "INSERT INTO snapshot (commit_sha) VALUES (?)", sha);
 
             Array touched = c.createArrayOf("text", touchedFiles.toArray());
-            update(c, "INSERT INTO component SELECT ?, fqn, layer, file FROM component"
+            update(c, "INSERT INTO component (" + COMPONENT + ") SELECT ?, fqn, layer, file FROM component"
                     + " WHERE commit_sha = ? AND file <> ALL(?)", sha, parentSha, touched);
-            update(c, "INSERT INTO node SELECT ?, id, fqn, method, layer, endpoint, body_hash, label, file FROM node"
+            update(c, "INSERT INTO node (" + NODE + ", label) SELECT ?, id, fqn, method, layer, endpoint, body_hash, file, label FROM node"
                     + " WHERE commit_sha = ? AND file <> ALL(?)", sha, parentSha, touched);
-            update(c, "INSERT INTO edge SELECT ?, from_id, to_id, file FROM edge"
+            update(c, "INSERT INTO edge (" + EDGE + ") SELECT ?, from_id, to_id, file FROM edge"
                     + " WHERE commit_sha = ? AND file <> ALL(?)", sha, parentSha, touched);
 
             insert(c, sha, fresh);
@@ -110,9 +131,6 @@ public class GraphStore {
             update(c, "UPDATE node n SET label = p.label FROM node p"
                     + " WHERE n.commit_sha = ? AND p.commit_sha = ? AND p.id = n.id AND p.body_hash = n.body_hash"
                     + " AND n.label IS NULL", sha, parentSha);
-            // callee 클래스가 삭제됐거나 어노테이션이 빠진 엣지 — 호출하는 쪽 파일이 안 바뀌어 복사로 딸려 온 것
-            update(c, "DELETE FROM edge e WHERE e.commit_sha = ? AND NOT EXISTS (SELECT 1 FROM component k"
-                    + " WHERE k.commit_sha = e.commit_sha AND k.fqn = split_part(e.to_id, '#', 1))", sha);
             c.commit();
         }
     }
@@ -140,24 +158,28 @@ public class GraphStore {
     }
 
     private static void insert(Connection c, String sha, Graph g) throws SQLException {
-        try (PreparedStatement ps = c.prepareStatement("INSERT INTO component VALUES (?, ?, ?, ?)")) {
+        try (PreparedStatement ps = c.prepareStatement("INSERT INTO component (" + COMPONENT + ") VALUES (?, ?, ?, ?)")) {
             for (Component k : g.components()) {
                 bind(ps, sha, k.fqn(), k.layer().name(), k.file()).addBatch();
             }
             ps.executeBatch();
         }
-        try (PreparedStatement ps = c.prepareStatement("INSERT INTO node VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?)")) {
+        try (PreparedStatement ps = c.prepareStatement("INSERT INTO node (" + NODE + ") VALUES (?, ?, ?, ?, ?, ?, ?, ?)")) {
             for (Node n : g.nodes().values()) {
                 bind(ps, sha, n.id(), n.fqn(), n.method(), n.layer().name(), n.endpoint(), n.bodyHash(), n.file()).addBatch();
             }
             ps.executeBatch();
         }
-        try (PreparedStatement ps = c.prepareStatement("INSERT INTO edge VALUES (?, ?, ?, ?)")) {
+        try (PreparedStatement ps = c.prepareStatement("INSERT INTO edge (" + EDGE + ") VALUES (?, ?, ?, ?)")) {
             for (Edge e : g.edges()) {
                 bind(ps, sha, e.from(), e.to(), e.file()).addBatch();
             }
             ps.executeBatch();
         }
+    }
+
+    private static String fqnOf(String nodeId) {
+        return nodeId.substring(0, nodeId.indexOf('#'));
     }
 
     private static boolean exists(Connection c, String sha) throws SQLException {

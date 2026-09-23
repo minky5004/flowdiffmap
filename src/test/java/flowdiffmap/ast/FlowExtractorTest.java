@@ -55,11 +55,12 @@ class FlowExtractorTest {
     }
 
     @Test
-    void 레이어_간_호출만_엣지로() throws IOException {
+    void 소스_안_다른_클래스로의_호출만_엣지로() throws IOException {
         Graph g = extractV1();
 
         // 상속 메서드(save · findById)는 JpaRepository 가 타입 솔버에 없어도 scope 타입으로 잡힌다
-        // 엔티티 호출(order.getAmount())과 Optional 체인(orElseThrow)은 엣지가 아니다
+        // 엔티티 호출(order.getAmount())도 엣지 — 컴포넌트 여부는 스냅샷을 읽을 때 거른다
+        // Optional 체인(orElseThrow)은 소스 밖 타입이라 엣지가 아니다
         assertThat(g.edges())
                 .extracting(Edge::from, Edge::to)
                 .containsExactlyInAnyOrder(
@@ -67,7 +68,8 @@ class FlowExtractorTest {
                         tuple(PKG + "OrderController#create/1", PKG + "OrderService#create/1"),
                         tuple(PKG + "OrderService#find/1", PKG + "OrderRepository#findById/1"),
                         tuple(PKG + "OrderService#create/1", PKG + "PaymentRepository#charge/1"),
-                        tuple(PKG + "OrderService#create/1", PKG + "OrderRepository#save/1"));
+                        tuple(PKG + "OrderService#create/1", PKG + "OrderRepository#save/1"),
+                        tuple(PKG + "OrderService#create/1", PKG + "Order#getAmount/0"));
         assertThat(g.edges())
                 .filteredOn(e -> e.from().startsWith(PKG + "OrderService"))
                 .extracting(Edge::file)

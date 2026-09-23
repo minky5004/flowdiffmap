@@ -1,6 +1,7 @@
 package flowdiffmap.store;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.tuple;
 
 import flowdiffmap.graph.Component;
@@ -114,6 +115,27 @@ class GraphStoreTest {
 
         assertThat(g.edges()).containsExactly(edge(GET, FIND.id()));
         assertThat(g.nodes()).doesNotContainKey("shop.R#findById/1");
+    }
+
+    @Test
+    void 컴포넌트가_된_callee_로_가는_엣지는_안_바뀐_호출자에서도_살아남() throws SQLException {
+        // 부모에서 V 는 컴포넌트가 아니라 C#get → V#check 가 저장만 되고 읽히지 않는다
+        Component v = new Component("shop.V", Layer.SERVICE, "shop/V.java");
+        Node check = node(v, "check", "1");
+        store.saveFull("p0", graph(Set.of(C), Set.of(edge(GET, check.id())), GET));
+        assertThat(store.load("p0").orElseThrow().edges()).isEmpty();
+
+        // V.java 에만 @Service 가 붙음 — C.java 는 그대로
+        store.saveIncremental("p0", "c", Set.of(v.file()), graph(Set.of(v), Set.of(), check));
+
+        assertThat(store.load("c").orElseThrow().edges()).containsExactly(edge(GET, check.id()));
+    }
+
+    @Test
+    void 부모_스냅샷이_없으면_저장하지_않음() throws SQLException {
+        assertThatThrownBy(() -> store.saveIncremental("missing", "c", Set.of(S.file()), graph(Set.of(S), Set.of(), FIND)))
+                .isInstanceOf(IllegalStateException.class);
+        assertThat(store.load("c")).isEmpty();
     }
 
     @Test

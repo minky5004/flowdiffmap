@@ -44,7 +44,7 @@ import java.util.Optional;
 import java.util.Set;
 
 /**
- * Spring 컴포넌트(Controller · Service · Repository)의 메서드를 노드로, 레이어 간 호출을 엣지로 뽑는다.
+ * Spring 컴포넌트(Controller · Service · Repository)의 메서드를 노드로, 소스 안 다른 클래스로의 호출을 엣지로 뽑는다.
  *
  * <p>호출 대상은 메서드가 아니라 scope 의 타입만 resolve 한다 — 대상 리포의 의존 jar 가 타입 솔버에 없어서
  * {@code orderRepository.save()} 처럼 {@code JpaRepository} 에서 상속한 메서드는 메서드 resolve 가 항상 실패한다.
@@ -160,7 +160,11 @@ public class FlowExtractor {
         return Optional.empty();
     }
 
-    /** scope 의 타입이 소스 안의 컴포넌트일 때만 그 FQN. */
+    /**
+     * scope 의 타입이 소스 안의 클래스일 때 그 FQN — 컴포넌트가 아니어도 남긴다.
+     * 증분 저장에서 callee 파일만 바뀌어 컴포넌트가 되면(어노테이션 추가) 안 바뀐 호출자 엣지가 없어서는 안 되므로,
+     * 컴포넌트 여부는 스냅샷을 읽을 때 거른다.
+     */
     private static Optional<String> calleeFqn(MethodCallExpr call) {
         if (call.getScope().isEmpty()) {
             return Optional.empty();
@@ -172,7 +176,7 @@ public class FlowExtractor {
             }
             return type.asReferenceType().getTypeDeclaration()
                     .flatMap(declaration -> declaration.toAst())
-                    .flatMap(ast -> ast instanceof ClassOrInterfaceDeclaration c && layerOf(c) != null
+                    .flatMap(ast -> ast instanceof ClassOrInterfaceDeclaration c
                             ? c.getFullyQualifiedName()
                             : Optional.empty());
         } catch (RuntimeException e) {
