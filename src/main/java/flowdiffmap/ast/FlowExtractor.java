@@ -23,6 +23,7 @@ import com.github.javaparser.printer.configuration.DefaultPrinterConfiguration.C
 import com.github.javaparser.resolution.types.ResolvedType;
 import com.github.javaparser.symbolsolver.JavaSymbolSolver;
 import com.github.javaparser.symbolsolver.resolution.typesolvers.TypeSolverBuilder;
+import flowdiffmap.graph.Component;
 import flowdiffmap.graph.Edge;
 import flowdiffmap.graph.Graph;
 import flowdiffmap.graph.Layer;
@@ -76,6 +77,7 @@ public class FlowExtractor {
     public Graph extract(Collection<Path> files) {
         Map<String, Node> nodes = new HashMap<>();
         Set<Edge> edges = new HashSet<>();
+        Set<Component> components = new HashSet<>();
         for (Path file : files) {
             Path abs = file.toAbsolutePath().normalize();
             if (!abs.startsWith(srcRoot)) {
@@ -93,6 +95,7 @@ public class FlowExtractor {
                     continue;
                 }
                 String fqn = type.getFullyQualifiedName().orElseThrow();
+                components.add(new Component(fqn, layer, rel));
                 for (MethodDeclaration m : type.getMethods()) {
                     if (!isEntry(layer, m)) {
                         continue;
@@ -113,7 +116,7 @@ public class FlowExtractor {
                 }
             }
         }
-        return new Graph(nodes, edges);
+        return new Graph(nodes, edges, components);
     }
 
     /** 컨트롤러는 핸들러 메서드만 · 나머지는 private 이 아닌 메서드. */

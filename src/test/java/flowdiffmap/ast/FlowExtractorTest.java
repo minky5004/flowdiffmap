@@ -3,6 +3,7 @@ package flowdiffmap.ast;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.tuple;
 
+import flowdiffmap.graph.Component;
 import flowdiffmap.graph.Edge;
 import flowdiffmap.graph.Graph;
 import flowdiffmap.graph.Layer;
@@ -43,6 +44,14 @@ class FlowExtractorTest {
                         tuple(PKG + "OrderService#create/1", Layer.SERVICE, null, "shop/order/OrderService.java"),
                         tuple(PKG + "OrderRepository#findByStatus/1", Layer.REPOSITORY, null, "shop/order/OrderRepository.java"),
                         tuple(PKG + "PaymentRepository#charge/1", Layer.REPOSITORY, null, "shop/order/PaymentRepository.java"));
+        // 엔티티 Order 는 컴포넌트가 아니다
+        assertThat(g.components())
+                .extracting(Component::fqn, Component::layer)
+                .containsExactlyInAnyOrder(
+                        tuple(PKG + "OrderController", Layer.CONTROLLER),
+                        tuple(PKG + "OrderService", Layer.SERVICE),
+                        tuple(PKG + "OrderRepository", Layer.REPOSITORY),
+                        tuple(PKG + "PaymentRepository", Layer.REPOSITORY));
     }
 
     @Test

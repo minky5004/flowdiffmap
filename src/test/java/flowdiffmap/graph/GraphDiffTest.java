@@ -20,7 +20,7 @@ class GraphDiffTest {
     }
 
     static Graph graph(Set<Edge> edges, Node... nodes) {
-        return new Graph(Stream.of(nodes).collect(Collectors.toMap(Node::id, Function.identity())), edges);
+        return new Graph(Stream.of(nodes).collect(Collectors.toMap(Node::id, Function.identity())), edges, Set.of());
     }
 
     @Test
