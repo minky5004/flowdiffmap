@@ -1,0 +1,131 @@
+package flowdiffmap.store;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.tuple;
+
+import flowdiffmap.graph.Component;
+import flowdiffmap.graph.Edge;
+import flowdiffmap.graph.Graph;
+import flowdiffmap.graph.Layer;
+import flowdiffmap.graph.Node;
+import java.sql.DriverManager;
+import java.sql.SQLException;
+import java.util.Map;
+import java.util.Set;
+import java.util.function.Function;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.testcontainers.junit.jupiter.Container;
+import org.testcontainers.junit.jupiter.Testcontainers;
+import org.testcontainers.postgresql.PostgreSQLContainer;
+
+@Testcontainers
+class GraphStoreTest {
+
+    @Container
+    static final PostgreSQLContainer PG = new PostgreSQLContainer("postgres:17");
+
+    static final Component C = new Component("shop.C", Layer.CONTROLLER, "shop/C.java");
+    static final Component S = new Component("shop.S", Layer.SERVICE, "shop/S.java");
+    // 선언 메서드 없이 상속만 하는 Spring Data 리포지토리
+    static final Component R = new Component("shop.R", Layer.REPOSITORY, "shop/R.java");
+
+    GraphStore store;
+
+    static Node node(Component c, String method, String hash) {
+        return new Node(c.fqn() + "#" + method + "/0", c.fqn(), method, c.layer(), null, hash, c.file());
+    }
+
+    static Edge edge(Node from, String to) {
+        return new Edge(from.id(), to, from.file());
+    }
+
+    static Graph graph(Set<Component> components, Set<Edge> edges, Node... nodes) {
+        return new Graph(Stream.of(nodes).collect(Collectors.toMap(Node::id, Function.identity())), edges, components);
+    }
+
+    static final Node GET = node(C, "get", "1");
+    static final Node FIND = node(S, "find", "1");
+    static final Node OLD = node(S, "old", "1");
+
+    /** 부모 {@code p} — C#get → S#find → R#findById(상속 메서드라 노드 없음) · 라벨은 셋 다 붙어 있다. */
+    @BeforeEach
+    void parent() throws SQLException {
+        try (var c = DriverManager.getConnection(PG.getJdbcUrl(), PG.getUsername(), PG.getPassword())) {
+            c.createStatement().execute("DROP TABLE IF EXISTS snapshot, component, node, edge");
+        }
+        store = new GraphStore(PG.getJdbcUrl(), PG.getUsername(), PG.getPassword());
+        store.saveFull("p", graph(Set.of(C, S, R),
+                Set.of(edge(GET, FIND.id()), edge(FIND, "shop.R#findById/1")),
+                GET, FIND, OLD));
+        store.updateLabels("p", Map.of(GET.id(), "주문 조회", FIND.id(), "주문 찾기", OLD.id(), "옛 메서드"));
+    }
+
+    @Test
+    void 부모_복사_후_바뀐_파일만_교체하고_라벨_보존() throws SQLException {
+        Node add = node(S, "add", "1");
+        store.saveIncremental("p", "c", Set.of(S.file()),
+                graph(Set.of(S), Set.of(edge(FIND, "shop.R#findById/1")), FIND, add));
+
+        Graph g = store.load("c").orElseThrow();
+
+        // 상속 메서드 callee 는 암묵 노드로 채워진다
+        assertThat(g.nodes().values())
+                .extracting(Node::id, Node::layer)
+                .containsExactlyInAnyOrder(
+                        tuple(GET.id(), Layer.CONTROLLER),
+                        tuple(FIND.id(), Layer.SERVICE),
+                        tuple(add.id(), Layer.SERVICE),
+                        tuple("shop.R#findById/1", Layer.REPOSITORY));
+        assertThat(g.edges()).containsExactlyInAnyOrder(edge(GET, FIND.id()), edge(FIND, "shop.R#findById/1"));
+        // 안 바뀐 파일의 노드 · 바뀐 파일 안에서도 본문이 같은 노드는 라벨 유지 — 새 노드만 라벨 없음
+        assertThat(store.labels("c")).containsExactlyInAnyOrderEntriesOf(Map.of(GET.id(), "주문 조회", FIND.id(), "주문 찾기"));
+        // 부모 스냅샷은 그대로
+        assertThat(store.load("p").orElseThrow().nodes()).containsKey(OLD.id());
+    }
+
+    @Test
+    void 본문이_바뀐_노드는_라벨을_잃음() throws SQLException {
+        store.saveIncremental("p", "c", Set.of(S.file()),
+                graph(Set.of(S), Set.of(), node(S, "find", "2")));
+
+        assertThat(store.labels("c")).containsOnlyKeys(GET.id());
+    }
+
+    @Test
+    void 삭제된_파일의_행_제거() throws SQLException {
+        store.saveIncremental("p", "c", Set.of(C.file()), graph(Set.of(), Set.of()));
+
+        Graph g = store.load("c").orElseThrow();
+
+        assertThat(g.nodes()).doesNotContainKey(GET.id());
+        assertThat(g.edges()).containsExactly(edge(FIND, "shop.R#findById/1"));
+        assertThat(g.components()).containsExactlyInAnyOrder(S, R);
+    }
+
+    @Test
+    void 컴포넌트가_아니게_된_callee_로_가는_엣지_정리() throws SQLException {
+        // R.java 만 바뀌고 어노테이션 · 상속이 빠짐 — 호출하는 S.java 는 그대로
+        store.saveIncremental("p", "c", Set.of(R.file()), graph(Set.of(), Set.of()));
+
+        Graph g = store.load("c").orElseThrow();
+
+        assertThat(g.edges()).containsExactly(edge(GET, FIND.id()));
+        assertThat(g.nodes()).doesNotContainKey("shop.R#findById/1");
+    }
+
+    @Test
+    void 같은_커밋을_다시_저장하면_덮어씀() throws SQLException {
+        store.saveIncremental("p", "c", Set.of(S.file()), graph(Set.of(S), Set.of(), FIND));
+        store.saveIncremental("p", "c", Set.of(S.file()), graph(Set.of(S), Set.of(), FIND));
+
+        assertThat(store.load("c").orElseThrow().nodes()).containsOnlyKeys(GET.id(), FIND.id());
+    }
+
+    @Test
+    void 없는_커밋은_empty() throws SQLException {
+        assertThat(store.load("nope")).isEmpty();
+    }
+}
