@@ -1,11 +1,18 @@
 plugins {
     id 'java'
+    id 'application'
 }
 
 java {
     toolchain {
         languageVersion = JavaLanguageVersion.of(21)
     }
+}
+
+application {
+    mainClass = 'flowdiffmap.Main'
+    // 훅이 stderr 를 로그 파일로 돌리면 JVM 은 OS 기본 인코딩(한국어 Windows 는 CP949)으로 쓴다
+    applicationDefaultJvmArgs = ['-Dstderr.encoding=UTF-8']
 }
 
 repositories {
