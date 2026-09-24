@@ -95,6 +95,12 @@ public class GraphStore {
         }
     }
 
+    public boolean has(String sha) throws SQLException {
+        try (Connection c = connect()) {
+            return exists(c, sha);
+        }
+    }
+
     /** 부모 없이 {@code g} 만으로 — 첫 실행 · 루트 커밋의 베이스라인. */
     public void saveFull(String sha, Graph g) throws SQLException {
         saveIncremental(null, sha, Set.of(), g);

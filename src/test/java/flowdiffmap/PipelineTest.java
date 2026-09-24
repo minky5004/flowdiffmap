@@ -7,6 +7,8 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
 import java.sql.DriverManager;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -39,7 +41,7 @@ class PipelineTest {
         try (var c = DriverManager.getConnection(PG.getJdbcUrl(), PG.getUsername(), PG.getPassword())) {
             c.createStatement().execute("DROP TABLE IF EXISTS snapshot, component, node, edge");
         }
-        store =new GraphStore(PG.getJdbcUrl(), PG.getUsername(), PG.getPassword());
+        store = new GraphStore(PG.getJdbcUrl(), PG.getUsername(), PG.getPassword());
         out = repo.resolve("docs/flow/request-flow.md");
         git("init", "-q");
     }
@@ -70,6 +72,75 @@ class PipelineTest {
                 .contains("[\"OrderService.create\"]:::removed")
                 .contains("[\"OrderService.find\"]:::changed")
                 .contains("[\"GET /orders/{id}<br/>OrderController.get\"]\n");
+        // v2 에서 지운 파일 — 그 컴포넌트가 스냅샷에서 빠진다
+        assertThat(store.load(head()).orElseThrow().components())
+                .extracting(c -> c.fqn()).doesNotContain("shop.order.PaymentRepository");
+    }
+
+    @Test
+    void 흐름이_안_바뀐_java_커밋은_직전_하이라이트를_유지() throws Exception {
+        commit("v1");
+        Main.run(repo, store);
+        commit("v2");
+        Main.run(repo, store);
+        String before = Files.readString(out);
+        Files.writeString(src("shop/order/Order.java"), "\n// 필드 주석\n", StandardOpenOption.APPEND);
+        git("commit", "-qam", "dto");
+
+        Main.run(repo, store);
+
+        assertThat(Files.readString(out)).isEqualTo(before);
+        assertThat(store.load(head())).isPresent();
+    }
+
+    @Test
+    void 파싱_실패한_파일은_부모_스냅샷_행을_그대로_둠() throws Exception {
+        commit("v1");
+        Main.run(repo, store);
+        String before = Files.readString(out);
+        Files.writeString(src("shop/order/OrderService.java"), "class {", StandardOpenOption.APPEND);
+        git("commit", "-qam", "wip");
+
+        Main.run(repo, store);
+
+        assertThat(store.load(head()).orElseThrow().nodes()).containsKey("shop.order.OrderService#find/1");
+        assertThat(Files.readString(out)).isEqualTo(before);
+    }
+
+    @Test
+    void 커밋하지_않은_작업_폴더_변경은_스냅샷에_안_들어감() throws Exception {
+        commit("v1");
+        Main.run(repo, store);
+        // v2 서비스를 stage 한 뒤 작업 폴더에서만 refund 추가 — git add -p 한 부분 커밋과 같은 상태
+        Path service = src("shop/order/OrderService.java");
+        Files.copy(FIXTURE.resolve("v2/shop/order/OrderService.java"), service, StandardCopyOption.REPLACE_EXISTING);
+        git("add", service.toString());
+        String staged = Files.readString(service);
+        Files.writeString(service, staged.substring(0, staged.lastIndexOf('}')) + "    public void refund(Long id) {\n    }\n}\n");
+        git("commit", "-qm", "partial");
+
+        Main.run(repo, store);
+
+        assertThat(store.load(head()).orElseThrow().nodes())
+                .containsKey("shop.order.OrderService#cancel/1")
+                .doesNotContainKey("shop.order.OrderService#refund/1");
+    }
+
+    @Test
+    void 추적_안_된_파일은_베이스라인에_안_들어감() throws Exception {
+        commit("v1");
+        Files.writeString(src("shop/order/DraftController.java"), """
+                package shop.order;
+                @org.springframework.web.bind.annotation.RestController
+                class DraftController {
+                    @org.springframework.web.bind.annotation.GetMapping("/draft")
+                    void draft() {}
+                }
+                """);
+
+        Main.run(repo, store);
+
+        assertThat(Files.readString(out)).doesNotContain("DraftController");
     }
 
     @Test
@@ -85,7 +156,7 @@ class PipelineTest {
         Main.run(repo, store);
 
         assertThat(Files.readString(out)).isEqualTo(before);
-        assertThat(store.load(git("rev-parse", "HEAD").strip())).isPresent();
+        assertThat(store.load(head())).isPresent();
     }
 
     @Test
@@ -99,6 +170,14 @@ class PipelineTest {
                 .contains("DELETE /orders/{id}<br/>OrderController.cancel")
                 .doesNotContain("OrderService.create")
                 .contains("첫 스냅샷");
+    }
+
+    Path src(String rel) {
+        return repo.resolve("src/main/java").resolve(rel);
+    }
+
+    String head() throws Exception {
+        return git("rev-parse", "HEAD").strip();
     }
 
     /** {@code src/main/java} 를 fixture 버전으로 통째로 갈아 끼우고 커밋. */

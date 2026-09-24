@@ -1,0 +1,2 @@
+# sh 훅 — Windows 에서 CRLF 로 체크아웃되면 shebang 줄 끝의 CR 때문에 실행 실패
+hooks/post-commit text eol=lf
