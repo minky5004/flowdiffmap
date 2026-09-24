@@ -11,7 +11,6 @@ import flowdiffmap.graph.Layer;
 import flowdiffmap.graph.Node;
 import java.sql.DriverManager;
 import java.sql.SQLException;
-import java.util.Map;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -51,7 +50,7 @@ class GraphStoreTest {
     static final Node FIND = node(S, "find", "1");
     static final Node OLD = node(S, "old", "1");
 
-    /** 부모 {@code p} — C#get → S#find → R#findById(상속 메서드라 노드 없음) · 라벨은 셋 다 붙어 있다. */
+    /** 부모 {@code p} — C#get → S#find → R#findById(상속 메서드라 노드 없음). */
     @BeforeEach
     void parent() throws SQLException {
         try (var c = DriverManager.getConnection(PG.getJdbcUrl(), PG.getUsername(), PG.getPassword())) {
@@ -61,11 +60,10 @@ class GraphStoreTest {
         store.saveFull("p", graph(Set.of(C, S, R),
                 Set.of(edge(GET, FIND.id()), edge(FIND, "shop.R#findById/1")),
                 GET, FIND, OLD));
-        store.updateLabels("p", Map.of(GET.id(), "주문 조회", FIND.id(), "주문 찾기", OLD.id(), "옛 메서드"));
     }
 
     @Test
-    void 부모_복사_후_바뀐_파일만_교체하고_라벨_보존() throws SQLException {
+    void 부모_복사_후_바뀐_파일만_교체() throws SQLException {
         Node add = node(S, "add", "1");
         store.saveIncremental("p", "c", Set.of(S.file()),
                 graph(Set.of(S), Set.of(edge(FIND, "shop.R#findById/1")), FIND, add));
@@ -81,18 +79,8 @@ class GraphStoreTest {
                         tuple(add.id(), Layer.SERVICE),
                         tuple("shop.R#findById/1", Layer.REPOSITORY));
         assertThat(g.edges()).containsExactlyInAnyOrder(edge(GET, FIND.id()), edge(FIND, "shop.R#findById/1"));
-        // 안 바뀐 파일의 노드 · 바뀐 파일 안에서도 본문이 같은 노드는 라벨 유지 — 새 노드만 라벨 없음
-        assertThat(store.labels("c")).containsExactlyInAnyOrderEntriesOf(Map.of(GET.id(), "주문 조회", FIND.id(), "주문 찾기"));
         // 부모 스냅샷은 그대로
         assertThat(store.load("p").orElseThrow().nodes()).containsKey(OLD.id());
-    }
-
-    @Test
-    void 본문이_바뀐_노드는_라벨을_잃음() throws SQLException {
-        store.saveIncremental("p", "c", Set.of(S.file()),
-                graph(Set.of(S), Set.of(), node(S, "find", "2")));
-
-        assertThat(store.labels("c")).containsOnlyKeys(GET.id());
     }
 
     @Test

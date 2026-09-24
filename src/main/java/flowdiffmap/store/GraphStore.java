@@ -121,40 +121,14 @@ public class GraphStore {
             Array touched = c.createArrayOf("text", touchedFiles.toArray());
             update(c, "INSERT INTO component (" + COMPONENT + ") SELECT ?, fqn, layer, file FROM component"
                     + " WHERE commit_sha = ? AND file <> ALL(?)", sha, parentSha, touched);
-            update(c, "INSERT INTO node (" + NODE + ", label) SELECT ?, id, fqn, method, layer, endpoint, body_hash, file, label FROM node"
+            update(c, "INSERT INTO node (" + NODE + ") SELECT ?, id, fqn, method, layer, endpoint, body_hash, file FROM node"
                     + " WHERE commit_sha = ? AND file <> ALL(?)", sha, parentSha, touched);
             update(c, "INSERT INTO edge (" + EDGE + ") SELECT ?, from_id, to_id, file FROM edge"
                     + " WHERE commit_sha = ? AND file <> ALL(?)", sha, parentSha, touched);
 
             insert(c, sha, fresh);
-            // 바뀐 파일 안에서도 선언이 그대로인 노드는 부모 라벨을 이어받는다 — LLM 에 다시 보내지 않게
-            update(c, "UPDATE node n SET label = p.label FROM node p"
-                    + " WHERE n.commit_sha = ? AND p.commit_sha = ? AND p.id = n.id AND p.body_hash = n.body_hash"
-                    + " AND n.label IS NULL", sha, parentSha);
             c.commit();
         }
-    }
-
-    public void updateLabels(String sha, Map<String, String> labels) throws SQLException {
-        try (Connection c = connect();
-             PreparedStatement ps = c.prepareStatement("UPDATE node SET label = ? WHERE commit_sha = ? AND id = ?")) {
-            for (var e : labels.entrySet()) {
-                bind(ps, e.getValue(), sha, e.getKey()).addBatch();
-            }
-            ps.executeBatch();
-        }
-    }
-
-    /** 라벨이 붙은 노드만. */
-    public Map<String, String> labels(String sha) throws SQLException {
-        Map<String, String> labels = new HashMap<>();
-        try (Connection c = connect();
-             ResultSet r = query(c, "SELECT id, label FROM node WHERE commit_sha = ? AND label IS NOT NULL", sha)) {
-            while (r.next()) {
-                labels.put(r.getString(1), r.getString(2));
-            }
-        }
-        return labels;
     }
 
     private static void insert(Connection c, String sha, Graph g) throws SQLException {
