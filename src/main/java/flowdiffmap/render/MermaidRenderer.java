@@ -110,8 +110,8 @@ public final class MermaidRenderer {
         return ids.stream().sorted().map(nodes::get).filter(MermaidRenderer::declared).toList();
     }
 
-    private static void nodeRows(StringBuilder md, String kind, List<Node> targets, Function<Node, String> cell) {
-        targets.forEach(n -> md.append("| ").append(kind).append(" | ").append(cell.apply(n)).append(" |\n"));
+    private static void nodeRows(StringBuilder md, String kind, List<Node> targets, Function<Node, String> name) {
+        targets.forEach(n -> md.append("| ").append(kind).append(" | ").append(name.apply(n)).append(" |\n"));
     }
 
     private static void edgeRows(StringBuilder md, String kind, Set<Edge> edges, Function<Edge, String> arrow) {
