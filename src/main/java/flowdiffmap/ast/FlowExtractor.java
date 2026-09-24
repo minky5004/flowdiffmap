@@ -61,6 +61,7 @@ public class FlowExtractor {
 
     private final Path srcRoot;
     private final JavaParser parser;
+    private final Set<String> unparsed = new HashSet<>();
     private final DefaultPrettyPrinter declarationPrinter = new DefaultPrettyPrinter(new DefaultPrinterConfiguration()
             .removeOption(new DefaultConfigurationOption(ConfigOption.PRINT_COMMENTS))
             .removeOption(new DefaultConfigurationOption(ConfigOption.PRINT_JAVADOC)));
@@ -73,8 +74,9 @@ public class FlowExtractor {
                 .setSymbolResolver(new JavaSymbolSolver(typeSolver)));
     }
 
-    /** 파싱에 실패한 파일은 경고만 남기고 건너뛴다. */
+    /** 파싱에 실패한 파일은 경고만 남기고 건너뛴다 — 목록은 {@link #unparsed()}. */
     public Graph extract(Collection<Path> files) {
+        unparsed.clear();
         Map<String, Node> nodes = new HashMap<>();
         Set<Edge> edges = new HashSet<>();
         Set<Component> components = new HashSet<>();
@@ -84,11 +86,12 @@ public class FlowExtractor {
                 System.err.println("[flowdiffmap] 소스 루트 밖 · 건너뜀: " + file);
                 continue;
             }
+            String rel = srcRoot.relativize(abs).toString().replace('\\', '/');
             Optional<CompilationUnit> cu = parse(abs);
             if (cu.isEmpty()) {
+                unparsed.add(rel);
                 continue;
             }
-            String rel = srcRoot.relativize(abs).toString().replace('\\', '/');
             for (ClassOrInterfaceDeclaration type : cu.get().findAll(ClassOrInterfaceDeclaration.class)) {
                 Layer layer = layerOf(type);
                 if (layer == null) {
@@ -117,6 +120,14 @@ public class FlowExtractor {
             }
         }
         return new Graph(nodes, edges, components);
+    }
+
+    /**
+     * 직전 {@link #extract} 에서 읽지 못한 파일 · {@link Node#file()} 과 같은 형식 — 문법 오류 중인 파일의 노드가
+     * 전부 삭제로 보이지 않게, 호출자가 부모 스냅샷 행을 그대로 두는 데 쓴다.
+     */
+    public Set<String> unparsed() {
+        return Set.copyOf(unparsed);
     }
 
     /** 컨트롤러는 핸들러 메서드만 · 나머지는 private 이 아닌 메서드. */

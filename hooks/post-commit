@@ -1,0 +1,3 @@
+#!/bin/sh
+# flowdiffmap — 커밋마다 docs/flow/request-flow.md 갱신 · 실패해도 커밋은 그대로
+"$FLOWDIFFMAP_HOME/bin/flowdiffmap" >> "$(git rev-parse --git-dir)/flowdiffmap.log" 2>&1 || true
