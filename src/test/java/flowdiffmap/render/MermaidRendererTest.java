@@ -6,7 +6,6 @@ import flowdiffmap.graph.Edge;
 import flowdiffmap.graph.Graph;
 import flowdiffmap.graph.Layer;
 import flowdiffmap.graph.Node;
-import java.util.Map;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -36,8 +35,8 @@ class MermaidRendererTest {
         return new Edge(from.id(), to.id(), from.file());
     }
 
-    static String render(Graph before, Graph after, Map<String, String> labels) {
-        return MermaidRenderer.render(before, after, labels, "abc1234");
+    static String render(Graph before, Graph after) {
+        return MermaidRenderer.render(before, after, "abc1234");
     }
 
     @Test
@@ -45,7 +44,7 @@ class MermaidRendererTest {
         Graph before = graph(Set.of(), GET, FIND);
         Graph after = graph(Set.of(), GET, FIND, CANCEL);
 
-        String md = render(before, after, Map.of());
+        String md = render(before, after);
 
         assertThat(md).contains("shop_OrderService_cancel_1[\"OrderService.cancel\"]:::added")
                 .contains("shop_OrderController_get_1[\"GET /orders/{id}<br/>OrderController.get\"]\n")
@@ -57,7 +56,7 @@ class MermaidRendererTest {
         Graph before = graph(Set.of(), FIND);
         Graph after = graph(Set.of(), service("find", 1, "2"));
 
-        assertThat(render(before, after, Map.of())).contains("[\"OrderService.find\"]:::changed")
+        assertThat(render(before, after)).contains("[\"OrderService.find\"]:::changed")
                 .contains("| 변경 | OrderService.find |");
     }
 
@@ -66,10 +65,10 @@ class MermaidRendererTest {
         Graph before = graph(Set.of(), GET, FIND, CANCEL);
         Graph after = graph(Set.of(), GET, FIND);
 
-        String md = render(before, after, Map.of(CANCEL.id(), "주문 취소"));
+        String md = render(before, after);
 
-        assertThat(md).contains("[\"주문 취소\"]:::removed")
-                .contains("| 삭제 | 주문 취소 |");
+        assertThat(md).contains("[\"OrderService.cancel\"]:::removed")
+                .contains("| 삭제 | OrderService.cancel |");
     }
 
     @Test
@@ -77,7 +76,7 @@ class MermaidRendererTest {
         Graph before = graph(Set.of(edge(GET, CANCEL)), GET, FIND, CANCEL);
         Graph after = graph(Set.of(edge(GET, FIND)), GET, FIND, CANCEL);
 
-        String md = render(before, after, Map.of());
+        String md = render(before, after);
 
         // 엣지는 id 순 — cancel 이 find 보다 앞이라 삭제된 cancel 호출이 0번
         assertThat(md).contains("    shop_OrderController_get_1 --> shop_OrderService_cancel_1\n"
@@ -92,7 +91,7 @@ class MermaidRendererTest {
         Graph before = graph(Set.of(), FIND);
         Graph after = graph(Set.of(edge(FIND, BY_ID)), FIND, BY_ID);
 
-        String md = render(before, after, Map.of());
+        String md = render(before, after);
 
         assertThat(md).contains("[\"OrderRepository.findById\"]\n")
                 .doesNotContain("| 추가 | OrderRepository.findById |")
@@ -100,29 +99,28 @@ class MermaidRendererTest {
     }
 
     @Test
-    void 오버로드만_폴백_이름에_인자_수() {
+    void 오버로드만_이름에_인자_수() {
         Graph g = graph(Set.of(), FIND, service("find", 2, "1"), CANCEL);
 
-        assertThat(render(g, g, Map.of())).contains("[\"OrderService.find/1\"]").contains("[\"OrderService.find/2\"]")
+        assertThat(render(g, g)).contains("[\"OrderService.find/1\"]").contains("[\"OrderService.find/2\"]")
                 .contains("[\"OrderService.cancel\"]");
     }
 
     @Test
-    void 라벨_속_따옴표_꺾쇠_줄바꿈_이스케이프() {
-        Graph before = graph(Set.of(), GET);
-        Graph after = graph(Set.of(), GET, FIND);
+    void 엔드포인트_속_따옴표_꺾쇠_이스케이프() {
+        Node odd = new Node("shop.OrderController#odd/0", "shop.OrderController", "odd",
+                Layer.CONTROLLER, "GET /a\"b\"/<c>", "1", "shop/OrderController.java");
 
-        String md = render(before, after, Map.of(FIND.id(), "\"VIP\" List<Order>\n조회 | 단건"));
+        String md = render(graph(Set.of()), graph(Set.of(), odd));
 
-        assertThat(md).contains("[\"#quot;VIP#quot; List#lt;Order#gt; 조회 | 단건\"]")
-                .contains("| 추가 | \"VIP\" List&lt;Order> 조회 \\| 단건 |");
+        assertThat(md).contains("[\"GET /a#quot;b#quot;/#lt;c#gt;<br/>OrderController.odd\"]:::added");
     }
 
     @Test
     void 빈_diff_면_classDef_없음() {
         Graph g = graph(Set.of(edge(GET, FIND)), GET, FIND);
 
-        String md = render(g, g, Map.of());
+        String md = render(g, g);
 
         assertThat(md).doesNotContain("classDef").doesNotContain(":::").doesNotContain("linkStyle")
                 .contains("바뀐 흐름 없음");
@@ -132,7 +130,7 @@ class MermaidRendererTest {
     void 부모_없으면_하이라이트_없이_전체() {
         Graph after = graph(Set.of(edge(GET, FIND)), GET, FIND);
 
-        String md = render(null, after, Map.of());
+        String md = render(null, after);
 
         assertThat(md).contains("shop_OrderController_get_1 --> shop_OrderService_find_1")
                 .doesNotContain(":::").contains("첫 스냅샷");

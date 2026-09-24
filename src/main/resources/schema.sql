@@ -19,7 +19,6 @@ CREATE TABLE IF NOT EXISTS node (
     layer      TEXT NOT NULL,
     endpoint   TEXT,
     body_hash  TEXT NOT NULL,
-    label      TEXT,
     file       TEXT NOT NULL,
     PRIMARY KEY (commit_sha, id)
 );

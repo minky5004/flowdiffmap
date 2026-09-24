@@ -32,16 +32,15 @@ public final class MermaidRenderer {
     /**
      * @param before null 이면 베이스라인 — 하이라이트 없이 {@code after} 만
      * @param after  {@code GraphStore.load} 결과 — 엣지 양 끝이 다 노드여야 한다(암묵 노드가 채워진 상태)
-     * @param labels 노드 id → LLM 이 붙인 이름 · 삭제 노드 몫은 부모 커밋 라벨로 · 없는 노드는 {@code 클래스.메서드}
      */
-    public static String render(Graph before, Graph after, Map<String, String> labels, String shortSha) {
+    public static String render(Graph before, Graph after, String shortSha) {
         GraphDiff diff = GraphDiff.between(before, after);
         Map<String, Node> nodes = new HashMap<>(after.nodes());
         diff.removedNodes().forEach(id -> nodes.put(id, before.nodes().get(id)));
         TreeSet<Edge> edges = new TreeSet<>(EDGE_ORDER);
         edges.addAll(after.edges());
         edges.addAll(diff.removedEdges());
-        Function<Node, String> name = namer(nodes.values(), labels);
+        Function<Node, String> name = namer(nodes.values());
 
         StringBuilder md = new StringBuilder("# 요청 흐름 · `" + shortSha + "`\n\n```mermaid\nflowchart LR\n");
         for (Layer layer : Layer.values()) {
@@ -52,7 +51,7 @@ public final class MermaidRenderer {
             }
             md.append("  subgraph ").append(layer).append("[\"").append(title(layer)).append("\"]\n");
             for (Node n : inLayer) {
-                String text = escape(name.apply(n));
+                String text = name.apply(n);
                 md.append("    ").append(mermaidId(n.id())).append("[\"")
                         .append(n.endpoint() == null ? text : escape(n.endpoint()) + "<br/>" + text).append("\"]")
                         .append(style(n, diff)).append('\n');
@@ -81,24 +80,22 @@ public final class MermaidRenderer {
         if (diff.isEmpty()) {
             return md.append(before == null ? "첫 스냅샷 · 비교할 부모 없음\n" : "이번 커밋에서 바뀐 흐름 없음\n").toString();
         }
-        // 표 칸에선 | 가 칸을 가르고 <…> 는 GitHub 가 HTML 태그로 삼킨다
-        Function<Node, String> cell = n -> oneLine(name.apply(n)).replace("|", "\\|").replace("<", "&lt;");
-        Function<Edge, String> arrow = e -> cell.apply(nodes.get(e.from())) + " → " + cell.apply(nodes.get(e.to()));
+        Function<Edge, String> arrow = e -> name.apply(nodes.get(e.from())) + " → " + name.apply(nodes.get(e.to()));
         md.append("| 구분 | 대상 |\n|---|---|\n");
-        nodeRows(md, "추가", declared(diff.addedNodes(), nodes), cell);
-        nodeRows(md, "삭제", declared(diff.removedNodes(), nodes), cell);
-        nodeRows(md, "변경", declared(diff.changedNodes(), nodes), cell);
+        nodeRows(md, "추가", declared(diff.addedNodes(), nodes), name);
+        nodeRows(md, "삭제", declared(diff.removedNodes(), nodes), name);
+        nodeRows(md, "변경", declared(diff.changedNodes(), nodes), name);
         edgeRows(md, "호출 추가", diff.addedEdges(), arrow);
         edgeRows(md, "호출 삭제", diff.removedEdges(), arrow);
         return md.toString();
     }
 
-    /** 오버로드가 있는 메서드만 폴백 이름에 인자 수를 붙인다 — 라벨이 없을 때 두 {@code find} 상자가 구분되게. */
-    private static Function<Node, String> namer(Collection<Node> nodes, Map<String, String> labels) {
+    /** {@code 클래스.메서드} · 오버로드가 있는 메서드만 인자 수를 붙인다 — 두 {@code find} 상자가 구분되게. */
+    private static Function<Node, String> namer(Collection<Node> nodes) {
         Map<String, Long> overloads = nodes.stream()
                 .collect(Collectors.groupingBy(n -> n.fqn() + "#" + n.method(), Collectors.counting()));
-        return n -> labels.getOrDefault(n.id(), n.fqn().substring(n.fqn().lastIndexOf('.') + 1) + "." + n.method()
-                + (overloads.get(n.fqn() + "#" + n.method()) > 1 ? "/" + n.id().substring(n.id().lastIndexOf('/') + 1) : ""));
+        return n -> n.fqn().substring(n.fqn().lastIndexOf('.') + 1) + "." + n.method()
+                + (overloads.get(n.fqn() + "#" + n.method()) > 1 ? "/" + n.id().substring(n.id().lastIndexOf('/') + 1) : "");
     }
 
     /**
@@ -140,13 +137,9 @@ public final class MermaidRenderer {
         return nodeId.replaceAll("[^A-Za-z0-9]", "_");
     }
 
-    /** LLM 라벨의 줄바꿈은 노드 줄을 끊고 {@code <>} 는 HTML 태그로 먹힌다. */
+    /** 엔드포인트는 소스의 문자열 리터럴 그대로라 {@code "} 는 노드 문법을 깨고 {@code <>} 는 HTML 태그로 먹힌다. */
     private static String escape(String s) {
-        return oneLine(s).replace("\"", "#quot;").replace("<", "#lt;").replace(">", "#gt;");
-    }
-
-    private static String oneLine(String s) {
-        return s.replaceAll("\\s*\\R\\s*", " ");
+        return s.replace("\"", "#quot;").replace("<", "#lt;").replace(">", "#gt;");
     }
 
     private static String title(Layer layer) {
