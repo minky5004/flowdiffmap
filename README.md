@@ -48,5 +48,5 @@ graph/            노드 · 엣지 그래프 · 두 커밋 사이 diff
 store/            커밋별 스냅샷 저장 · 부모 행 복사 + 바뀐 파일만 교체
 render/           Mermaid 흐름도 + 변경 표
 hooks/post-commit 훅 스크립트 · 실패해도 종료 코드 0
-hooks/install.sh  대상 리포 훅 폴더에 배포본 경로를 박아 설치
+hooks/install.sh  배포본 경로가 박힌 훅의 설치 스크립트
 ```
