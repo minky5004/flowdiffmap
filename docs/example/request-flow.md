@@ -1,4 +1,4 @@
-# 요청 흐름 · `3e6d328`
+# 요청 흐름 · `746d527`
 
 ```mermaid
 flowchart LR
@@ -38,14 +38,6 @@ flowchart LR
 
 | 구분 | 대상 |
 |---|---|
-| 추가 | OrderController.cancel |
-| 추가 | OrderService.cancel |
-| 삭제 | OrderController.create |
-| 삭제 | OrderService.create |
-| 삭제 | PaymentRepository.charge |
+| 기능 추가 | DELETE /orders/{id} |
+| 기능 삭제 | POST /orders |
 | 변경 | OrderService.find |
-| 호출 추가 | OrderController.cancel → OrderService.cancel |
-| 호출 추가 | OrderService.cancel → OrderRepository.deleteById |
-| 호출 삭제 | OrderController.create → OrderService.create |
-| 호출 삭제 | OrderService.create → OrderRepository.save |
-| 호출 삭제 | OrderService.create → PaymentRepository.charge |
