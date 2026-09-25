@@ -72,6 +72,45 @@ class MermaidRendererTest {
     }
 
     @Test
+    void 새_엔드포인트_전체는_기능_추가로_묶고_기존_노드_호출은_개별_행() {
+        Node cancelController = new Node("shop.OrderController#cancel/1", "shop.OrderController", "cancel",
+                Layer.CONTROLLER, "DELETE /orders/{id}", "1", "shop/OrderController.java");
+        Graph before = graph(Set.of(edge(FIND, BY_ID)), FIND, BY_ID);
+        Graph after = graph(Set.of(edge(FIND, BY_ID), edge(cancelController, CANCEL), edge(CANCEL, BY_ID)),
+                FIND, BY_ID, cancelController, CANCEL);
+
+        String md = render(before, after);
+
+        assertThat(md).contains("| 기능 추가 | DELETE /orders/{id} |")
+                .doesNotContain("| 추가 | OrderController.cancel |")
+                .doesNotContain("| 추가 | OrderService.cancel |")
+                .contains("| 호출 추가 | OrderService.cancel → OrderRepository.findById |");
+    }
+
+    @Test
+    void 기존_흐름에_메서드만_추가되면_rollup_없이_개별_행() {
+        Graph before = graph(Set.of(), GET, FIND);
+        Graph after = graph(Set.of(), GET, FIND, CANCEL);
+
+        String md = render(before, after);
+
+        assertThat(md).contains("| 추가 | OrderService.cancel |").doesNotContain("기능 추가");
+    }
+
+    @Test
+    void 삭제된_엔드포인트_전체는_기능_삭제로_묶음() {
+        Graph before = graph(Set.of(edge(GET, CANCEL)), GET, CANCEL);
+        Graph after = graph(Set.of());
+
+        String md = render(before, after);
+
+        assertThat(md).contains("| 기능 삭제 | GET /orders/{id} |")
+                .doesNotContain("| 삭제 | OrderController.get |")
+                .doesNotContain("| 삭제 | OrderService.cancel |")
+                .doesNotContain("| 호출 삭제 |");
+    }
+
+    @Test
     void 추가_엣지는_초록_삭제_엣지는_빨간_linkStyle() {
         Graph before = graph(Set.of(edge(GET, CANCEL)), GET, FIND, CANCEL);
         Graph after = graph(Set.of(edge(GET, FIND)), GET, FIND, CANCEL);

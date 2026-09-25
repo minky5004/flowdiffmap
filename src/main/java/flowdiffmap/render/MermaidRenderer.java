@@ -5,9 +5,14 @@ import flowdiffmap.graph.Graph;
 import flowdiffmap.graph.GraphDiff;
 import flowdiffmap.graph.Layer;
 import flowdiffmap.graph.Node;
+import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
+import java.util.Deque;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -81,13 +86,65 @@ public final class MermaidRenderer {
             return md.append(before == null ? "첫 스냅샷 · 비교할 부모 없음\n" : "이번 커밋에서 바뀐 흐름 없음\n").toString();
         }
         Function<Edge, String> arrow = e -> name.apply(nodes.get(e.from())) + " → " + name.apply(nodes.get(e.to()));
+        Set<String> claimedNodes = new HashSet<>();
+        Set<Edge> claimedEdges = new HashSet<>();
+        List<Node> featureAdded = featureEntries(diff.addedNodes(), diff.addedEdges(), nodes, claimedNodes, claimedEdges);
+        List<Node> featureRemoved = featureEntries(diff.removedNodes(), diff.removedEdges(), nodes, claimedNodes, claimedEdges);
+
         md.append("| 구분 | 대상 |\n|---|---|\n");
-        nodeRows(md, "추가", declared(diff.addedNodes(), nodes), name);
-        nodeRows(md, "삭제", declared(diff.removedNodes(), nodes), name);
+        featureRows(md, "기능 추가", featureAdded);
+        nodeRows(md, "추가", excludingClaimed(declared(diff.addedNodes(), nodes), claimedNodes), name);
+        featureRows(md, "기능 삭제", featureRemoved);
+        nodeRows(md, "삭제", excludingClaimed(declared(diff.removedNodes(), nodes), claimedNodes), name);
         nodeRows(md, "변경", declared(diff.changedNodes(), nodes), name);
-        edgeRows(md, "호출 추가", diff.addedEdges(), arrow);
-        edgeRows(md, "호출 삭제", diff.removedEdges(), arrow);
+        edgeRows(md, "호출 추가", excludingClaimed(diff.addedEdges(), claimedEdges), arrow);
+        edgeRows(md, "호출 삭제", excludingClaimed(diff.removedEdges(), claimedEdges), arrow);
         return md.toString();
+    }
+
+    /**
+     * 새로 생기거나 없어진 엔드포인트에서 그 엔드포인트로부터만 뻗어나가는 노드 · 엣지를 하나로 묶는다 —
+     * 다른 흐름과 공유돼 여전히 남는 다운스트림 노드는 묶지 않고 개별 행으로 남긴다. 라벨은 엔드포인트 그대로.
+     */
+    private static List<Node> featureEntries(Set<String> nodeIds, Set<Edge> edgeSet, Map<String, Node> nodes,
+            Set<String> claimedNodes, Set<Edge> claimedEdges) {
+        List<Node> entries = nodeIds.stream().sorted().map(nodes::get)
+                .filter(n -> n.layer() == Layer.CONTROLLER && n.endpoint() != null && declared(n)).toList();
+        List<Node> result = new ArrayList<>();
+        for (Node entry : entries) {
+            if (claimedNodes.contains(entry.id())) {
+                continue;
+            }
+            Set<String> component = new LinkedHashSet<>();
+            Deque<String> queue = new ArrayDeque<>();
+            component.add(entry.id());
+            queue.add(entry.id());
+            while (!queue.isEmpty()) {
+                String cur = queue.poll();
+                for (Edge e : edgeSet) {
+                    if (e.from().equals(cur) && nodeIds.contains(e.to()) && component.add(e.to())) {
+                        queue.add(e.to());
+                    }
+                }
+            }
+            claimedNodes.addAll(component);
+            edgeSet.stream().filter(e -> component.contains(e.from()) && component.contains(e.to()))
+                    .forEach(claimedEdges::add);
+            result.add(entry);
+        }
+        return result;
+    }
+
+    private static void featureRows(StringBuilder md, String kind, List<Node> entries) {
+        entries.forEach(n -> md.append("| ").append(kind).append(" | ").append(escape(n.endpoint())).append(" |\n"));
+    }
+
+    private static List<Node> excludingClaimed(List<Node> targets, Set<String> claimed) {
+        return targets.stream().filter(n -> !claimed.contains(n.id())).toList();
+    }
+
+    private static Set<Edge> excludingClaimed(Set<Edge> edges, Set<Edge> claimed) {
+        return edges.stream().filter(e -> !claimed.contains(e)).collect(Collectors.toSet());
     }
 
     /** {@code 클래스.메서드} · 오버로드가 있는 메서드만 인자 수를 붙인다 — 두 {@code find} 상자가 구분되게. */
