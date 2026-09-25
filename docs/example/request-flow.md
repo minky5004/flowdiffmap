@@ -1,23 +1,32 @@
-# 요청 흐름 · `746d527`
+# 요청 흐름 · `9c75e52`
 
 ```mermaid
 flowchart LR
-  subgraph CONTROLLER["Controller"]
+  subgraph LEGEND["범례"]
+    legend_added["노드 추가"]:::added
+    legend_removed["노드 삭제"]:::removed
+    legend_changed["노드 변경"]:::changed
+  end
+  subgraph F_shop_order_OrderController_cancel_1["DELETE /orders/{id}"]
     shop_order_OrderController_cancel_1["DELETE /orders/{id}<br/>OrderController.cancel"]:::added
+    shop_order_OrderRepository_deleteById_1["OrderRepository.deleteById"]
+    shop_order_OrderService_cancel_1["OrderService.cancel"]:::added
+  end
+  subgraph F_shop_order_OrderController_create_1["POST /orders"]
     shop_order_OrderController_create_1["POST /orders<br/>OrderController.create"]:::removed
+    shop_order_OrderRepository_save_1["OrderRepository.save"]
+    shop_order_OrderService_create_1["OrderService.create"]:::removed
+    shop_order_PaymentRepository_charge_1["PaymentRepository.charge"]:::removed
+  end
+  subgraph CONTROLLER["Controller"]
     shop_order_OrderController_get_1["GET /orders/{id}<br/>OrderController.get"]
   end
   subgraph SERVICE["Service"]
-    shop_order_OrderService_cancel_1["OrderService.cancel"]:::added
-    shop_order_OrderService_create_1["OrderService.create"]:::removed
     shop_order_OrderService_find_1["OrderService.find"]:::changed
   end
   subgraph REPOSITORY["Repository"]
-    shop_order_OrderRepository_deleteById_1["OrderRepository.deleteById"]
     shop_order_OrderRepository_findById_1["OrderRepository.findById"]
     shop_order_OrderRepository_findByStatus_1["OrderRepository.findByStatus"]
-    shop_order_OrderRepository_save_1["OrderRepository.save"]
-    shop_order_PaymentRepository_charge_1["PaymentRepository.charge"]:::removed
   end
     shop_order_OrderController_cancel_1 --> shop_order_OrderService_cancel_1
     shop_order_OrderController_create_1 --> shop_order_OrderService_create_1
