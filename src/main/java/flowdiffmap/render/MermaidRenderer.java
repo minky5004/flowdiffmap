@@ -5,11 +5,9 @@ import flowdiffmap.graph.Graph;
 import flowdiffmap.graph.GraphDiff;
 import flowdiffmap.graph.Layer;
 import flowdiffmap.graph.Node;
-import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
-import java.util.Deque;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
@@ -54,12 +52,21 @@ public final class MermaidRenderer {
         List<Feature> featureRemoved = featureEntries(diff.removedNodes(), diff.removedEdges(), nodes, claimedNodes, claimedEdges);
 
         StringBuilder md = new StringBuilder("# 요청 흐름 · `" + shortSha + "`\n\n```mermaid\nflowchart LR\n");
-        if (!diff.isEmpty()) {
-            md.append("  subgraph LEGEND[\"범례\"]\n")
-                    .append("    legend_added[\"노드 추가\"]:::added\n")
-                    .append("    legend_removed[\"노드 삭제\"]:::removed\n")
-                    .append("    legend_changed[\"노드 변경\"]:::changed\n")
-                    .append("  end\n");
+        boolean hasAdded = !declared(diff.addedNodes(), nodes).isEmpty();
+        boolean hasRemoved = !declared(diff.removedNodes(), nodes).isEmpty();
+        boolean hasChanged = !declared(diff.changedNodes(), nodes).isEmpty();
+        if (hasAdded || hasRemoved || hasChanged) {
+            md.append("  subgraph LEGEND[\"범례\"]\n");
+            if (hasAdded) {
+                md.append("    legend_added[\"노드 추가\"]:::added\n");
+            }
+            if (hasRemoved) {
+                md.append("    legend_removed[\"노드 삭제\"]:::removed\n");
+            }
+            if (hasChanged) {
+                md.append("    legend_changed[\"노드 변경\"]:::changed\n");
+            }
+            md.append("  end\n");
         }
         for (Feature f : featureAdded) {
             featureSubgraph(md, f, name, diff);
@@ -132,13 +139,15 @@ public final class MermaidRenderer {
 
     /**
      * 새로 생기거나 없어진 엔드포인트에서 그 엔드포인트에만 속하는 다운스트림 노드 · 엣지를 하나로 묶는다.
-     * 다른 엔드포인트로 이어지는 노드, 두 곳 이상에서 호출이 생기고/사라지는(공유) 노드는 묶지 않고 개별 행으로 남긴다.
+     * 다른 엔드포인트로 이어지는 노드는 절대 흡수하지 않고, 그 밖의 노드는 들어오는 호출이 전부 이미 이 묶음
+     * 안에서 오는 것일 때만(고정점까지 반복) 흡수한다 — 같은 흐름 안에서 두 갈래로 만나는 노드(다이아몬드)는
+     * 묶이고, 바깥(다른 흐름 · 손 안 댄 기존 코드)에서도 호출이 들어오는 진짜 공유 노드는 개별 행으로 남는다.
      * 라벨은 엔드포인트 그대로.
      */
     private static List<Feature> featureEntries(Set<String> nodeIds, Set<Edge> edgeSet, Map<String, Node> nodes,
             Set<String> claimedNodes, Set<Edge> claimedEdges) {
         Map<String, List<Edge>> byFrom = edgeSet.stream().collect(Collectors.groupingBy(Edge::from));
-        Map<String, Long> inDegree = edgeSet.stream().collect(Collectors.groupingBy(Edge::to, Collectors.counting()));
+        Map<String, List<Edge>> byTo = edgeSet.stream().collect(Collectors.groupingBy(Edge::to));
 
         List<Node> entries = nodeIds.stream().sorted().map(nodes::get)
                 .filter(n -> n.layer() == Layer.CONTROLLER && n.endpoint() != null && declared(n)).toList();
@@ -146,19 +155,19 @@ public final class MermaidRenderer {
 
         List<Feature> result = new ArrayList<>();
         for (Node entry : entries) {
-            if (claimedNodes.contains(entry.id())) {
-                continue;
-            }
             Set<String> component = new LinkedHashSet<>();
-            Deque<String> queue = new ArrayDeque<>();
             component.add(entry.id());
-            queue.add(entry.id());
-            while (!queue.isEmpty()) {
-                for (Edge e : byFrom.getOrDefault(queue.poll(), List.of())) {
-                    String to = e.to();
-                    // 다른 엔드포인트(그 자체로 독립된 행이어야 함) · 입력이 둘 이상인 공유 노드는 흡수하지 않는다
-                    if (nodeIds.contains(to) && !entryIds.contains(to) && inDegree.get(to) == 1L && component.add(to)) {
-                        queue.add(to);
+            boolean grown = true;
+            while (grown) {
+                grown = false;
+                for (String candidate : nodeIds) {
+                    if (component.contains(candidate) || entryIds.contains(candidate)) {
+                        continue;
+                    }
+                    List<Edge> incoming = byTo.getOrDefault(candidate, List.of());
+                    if (!incoming.isEmpty() && incoming.stream().allMatch(e -> component.contains(e.from()))) {
+                        component.add(candidate);
+                        grown = true;
                     }
                 }
             }

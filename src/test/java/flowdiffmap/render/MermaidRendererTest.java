@@ -161,17 +161,45 @@ class MermaidRendererTest {
     }
 
     @Test
-    void 범례는_바뀐_것_있을_때만() {
+    void 범례는_diff_없으면_아예_없음() {
+        Graph same = graph(Set.of(edge(GET, FIND)), GET, FIND);
+
+        assertThat(render(same, same)).doesNotContain("LEGEND").doesNotContain("범례");
+    }
+
+    @Test
+    void 범례는_실제_등장한_색만_보여줌() {
         Graph before = graph(Set.of(), FIND);
         Graph after = graph(Set.of(), service("find", 1, "2"));
 
         assertThat(render(before, after)).contains("subgraph LEGEND[\"범례\"]")
-                .contains("legend_added[\"노드 추가\"]:::added")
-                .contains("legend_removed[\"노드 삭제\"]:::removed")
-                .contains("legend_changed[\"노드 변경\"]:::changed");
+                .contains("legend_changed[\"노드 변경\"]:::changed")
+                .doesNotContain("legend_added").doesNotContain("legend_removed");
 
-        Graph same = graph(Set.of(edge(GET, FIND)), GET, FIND);
-        assertThat(render(same, same)).doesNotContain("LEGEND").doesNotContain("범례");
+        Graph before2 = graph(Set.of(), GET);
+        Graph after2 = graph(Set.of(), GET, FIND);
+        assertThat(render(before2, after2)).contains("legend_added[\"노드 추가\"]:::added")
+                .doesNotContain("legend_removed").doesNotContain("legend_changed");
+    }
+
+    @Test
+    void 같은_흐름_안에서_두_갈래로_만나는_노드는_기능에_흡수됨() {
+        Node cancelController = new Node("shop.OrderController#cancel/1", "shop.OrderController", "cancel",
+                Layer.CONTROLLER, "DELETE /orders/{id}", "1", "shop/OrderController.java");
+        Node notify = service("notify", 1, "1");
+        Node audit = service("audit", 1, "1");
+        // 다이아몬드: cancel -> {CANCEL, notify} -> audit (audit 로 들어오는 화살표 2개, 전부 이 기능 안에서 옴)
+        Graph before = graph(Set.of());
+        Graph after = graph(Set.of(edge(cancelController, CANCEL), edge(cancelController, notify),
+                edge(CANCEL, audit), edge(notify, audit)), cancelController, CANCEL, notify, audit);
+
+        String md = render(before, after);
+
+        assertThat(md).contains("| 기능 추가 | DELETE /orders/{id} |")
+                .contains("shop_OrderService_audit_1[\"OrderService.audit\"]:::added")
+                .doesNotContain("| 추가 | OrderService.audit |")
+                .doesNotContain("| 호출 추가 | OrderService.cancel → OrderService.audit |")
+                .doesNotContain("| 호출 추가 | OrderService.notify → OrderService.audit |");
     }
 
     @Test
