@@ -98,6 +98,39 @@ class MermaidRendererTest {
     }
 
     @Test
+    void 다른_엔드포인트를_직접_부르는_새_엔드포인트도_각각_기능_행으로_남음() {
+        Node forceCancel = new Node("shop.AdminController#forceCancel/1", "shop.AdminController", "forceCancel",
+                Layer.CONTROLLER, "DELETE /admin/orders/{id}", "1", "shop/AdminController.java");
+        Node cancelController = new Node("shop.OrderController#cancel/1", "shop.OrderController", "cancel",
+                Layer.CONTROLLER, "DELETE /orders/{id}", "1", "shop/OrderController.java");
+        Graph before = graph(Set.of());
+        Graph after = graph(Set.of(edge(forceCancel, cancelController)), forceCancel, cancelController);
+
+        String md = render(before, after);
+
+        assertThat(md).contains("| 기능 추가 | DELETE /admin/orders/{id} |")
+                .contains("| 기능 추가 | DELETE /orders/{id} |")
+                .contains("| 호출 추가 | AdminController.forceCancel → OrderController.cancel |");
+    }
+
+    @Test
+    void 새_메서드를_두_흐름이_동시에_부르면_공유_노드는_개별_행으로_남음() {
+        Node cancelController = new Node("shop.OrderController#cancel/1", "shop.OrderController", "cancel",
+                Layer.CONTROLLER, "DELETE /orders/{id}", "1", "shop/OrderController.java");
+        Node validate = service("validate", 1, "1");
+        Graph before = graph(Set.of(), GET);
+        Graph after = graph(Set.of(edge(cancelController, validate), edge(GET, validate)),
+                GET, cancelController, validate);
+
+        String md = render(before, after);
+
+        assertThat(md).contains("| 기능 추가 | DELETE /orders/{id} |")
+                .contains("| 추가 | OrderService.validate |")
+                .contains("| 호출 추가 | OrderController.cancel → OrderService.validate |")
+                .contains("| 호출 추가 | OrderController.get → OrderService.validate |");
+    }
+
+    @Test
     void 삭제된_엔드포인트_전체는_기능_삭제로_묶음() {
         Graph before = graph(Set.of(edge(GET, CANCEL)), GET, CANCEL);
         Graph after = graph(Set.of());

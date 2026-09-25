@@ -103,13 +103,19 @@ public final class MermaidRenderer {
     }
 
     /**
-     * 새로 생기거나 없어진 엔드포인트에서 그 엔드포인트로부터만 뻗어나가는 노드 · 엣지를 하나로 묶는다 —
-     * 다른 흐름과 공유돼 여전히 남는 다운스트림 노드는 묶지 않고 개별 행으로 남긴다. 라벨은 엔드포인트 그대로.
+     * 새로 생기거나 없어진 엔드포인트에서 그 엔드포인트에만 속하는 다운스트림 노드 · 엣지를 하나로 묶는다.
+     * 다른 엔드포인트로 이어지는 노드, 두 곳 이상에서 호출이 생기고/사라지는(공유) 노드는 묶지 않고 개별 행으로 남긴다.
+     * 라벨은 엔드포인트 그대로.
      */
     private static List<Node> featureEntries(Set<String> nodeIds, Set<Edge> edgeSet, Map<String, Node> nodes,
             Set<String> claimedNodes, Set<Edge> claimedEdges) {
+        Map<String, List<Edge>> byFrom = edgeSet.stream().collect(Collectors.groupingBy(Edge::from));
+        Map<String, Long> inDegree = edgeSet.stream().collect(Collectors.groupingBy(Edge::to, Collectors.counting()));
+
         List<Node> entries = nodeIds.stream().sorted().map(nodes::get)
                 .filter(n -> n.layer() == Layer.CONTROLLER && n.endpoint() != null && declared(n)).toList();
+        Set<String> entryIds = entries.stream().map(Node::id).collect(Collectors.toSet());
+
         List<Node> result = new ArrayList<>();
         for (Node entry : entries) {
             if (claimedNodes.contains(entry.id())) {
@@ -120,16 +126,19 @@ public final class MermaidRenderer {
             component.add(entry.id());
             queue.add(entry.id());
             while (!queue.isEmpty()) {
-                String cur = queue.poll();
-                for (Edge e : edgeSet) {
-                    if (e.from().equals(cur) && nodeIds.contains(e.to()) && component.add(e.to())) {
-                        queue.add(e.to());
+                for (Edge e : byFrom.getOrDefault(queue.poll(), List.of())) {
+                    String to = e.to();
+                    // 다른 엔드포인트(그 자체로 독립된 행이어야 함) · 입력이 둘 이상인 공유 노드는 흡수하지 않는다
+                    if (nodeIds.contains(to) && !entryIds.contains(to) && inDegree.get(to) == 1L && component.add(to)) {
+                        queue.add(to);
                     }
                 }
             }
             claimedNodes.addAll(component);
-            edgeSet.stream().filter(e -> component.contains(e.from()) && component.contains(e.to()))
-                    .forEach(claimedEdges::add);
+            for (String id : component) {
+                byFrom.getOrDefault(id, List.of()).stream().filter(e -> component.contains(e.to()))
+                        .forEach(claimedEdges::add);
+            }
             result.add(entry);
         }
         return result;
