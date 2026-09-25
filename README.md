@@ -34,9 +34,7 @@ Git Bash 기준 · JDK 21 · Docker 필요
 git clone https://github.com/minky5004/flowdiffmap.git && cd flowdiffmap
 docker compose up -d                                        # PostgreSQL → localhost:5432
 ./gradlew installDist                                       # → build/install/flowdiffmap
-export FLOWDIFFMAP_HOME="$PWD/build/install/flowdiffmap"    # 새 셸 · IDE 커밋에는 셸 프로필 · OS 환경변수로
-TARGET=/path/to/spring-repo
-cp hooks/post-commit "$(git -C "$TARGET" rev-parse --path-format=absolute --git-path hooks)/"
+hooks/install.sh /path/to/spring-repo                       # 배포본 경로를 박은 post-commit 훅 · 기존 훅 보존
 ```
 
 이후 대상 리포 커밋마다 `docs/flow/request-flow.md` 갱신 · 추적 안 된 파일로 남는 출력
@@ -50,4 +48,5 @@ graph/            노드 · 엣지 그래프 · 두 커밋 사이 diff
 store/            커밋별 스냅샷 저장 · 부모 행 복사 + 바뀐 파일만 교체
 render/           Mermaid 흐름도 + 변경 표
 hooks/post-commit 훅 스크립트 · 실패해도 종료 코드 0
+hooks/install.sh  대상 리포 훅 폴더에 배포본 경로를 박아 설치
 ```
