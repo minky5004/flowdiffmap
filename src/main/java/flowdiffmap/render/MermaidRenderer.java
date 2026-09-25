@@ -47,20 +47,35 @@ public final class MermaidRenderer {
         edges.addAll(diff.removedEdges());
         Function<Node, String> name = namer(nodes.values());
 
+        // 기능 rollup 은 그림(subgraph 배치)과 표가 같은 판정을 공유 — 여기서 한 번만 계산
+        Set<String> claimedNodes = new HashSet<>();
+        Set<Edge> claimedEdges = new HashSet<>();
+        List<Feature> featureAdded = featureEntries(diff.addedNodes(), diff.addedEdges(), nodes, claimedNodes, claimedEdges);
+        List<Feature> featureRemoved = featureEntries(diff.removedNodes(), diff.removedEdges(), nodes, claimedNodes, claimedEdges);
+
         StringBuilder md = new StringBuilder("# 요청 흐름 · `" + shortSha + "`\n\n```mermaid\nflowchart LR\n");
+        if (!diff.isEmpty()) {
+            md.append("  subgraph LEGEND[\"범례\"]\n")
+                    .append("    legend_added[\"노드 추가\"]:::added\n")
+                    .append("    legend_removed[\"노드 삭제\"]:::removed\n")
+                    .append("    legend_changed[\"노드 변경\"]:::changed\n")
+                    .append("  end\n");
+        }
+        for (Feature f : featureAdded) {
+            featureSubgraph(md, f, name, diff);
+        }
+        for (Feature f : featureRemoved) {
+            featureSubgraph(md, f, name, diff);
+        }
         for (Layer layer : Layer.values()) {
-            List<Node> inLayer = nodes.values().stream().filter(n -> n.layer() == layer)
+            List<Node> inLayer = nodes.values().stream()
+                    .filter(n -> n.layer() == layer && !claimedNodes.contains(n.id()))
                     .sorted(Comparator.comparing(Node::id)).toList();
             if (inLayer.isEmpty()) {
                 continue;
             }
             md.append("  subgraph ").append(layer).append("[\"").append(title(layer)).append("\"]\n");
-            for (Node n : inLayer) {
-                String text = name.apply(n);
-                md.append("    ").append(mermaidId(n.id())).append("[\"")
-                        .append(n.endpoint() == null ? text : escape(n.endpoint()) + "<br/>" + text).append("\"]")
-                        .append(style(n, diff)).append('\n');
-            }
+            inLayer.forEach(n -> nodeLine(md, n, name, diff));
             md.append("  end\n");
         }
         StringBuilder linkStyles = new StringBuilder();
@@ -86,11 +101,6 @@ public final class MermaidRenderer {
             return md.append(before == null ? "첫 스냅샷 · 비교할 부모 없음\n" : "이번 커밋에서 바뀐 흐름 없음\n").toString();
         }
         Function<Edge, String> arrow = e -> name.apply(nodes.get(e.from())) + " → " + name.apply(nodes.get(e.to()));
-        Set<String> claimedNodes = new HashSet<>();
-        Set<Edge> claimedEdges = new HashSet<>();
-        List<Node> featureAdded = featureEntries(diff.addedNodes(), diff.addedEdges(), nodes, claimedNodes, claimedEdges);
-        List<Node> featureRemoved = featureEntries(diff.removedNodes(), diff.removedEdges(), nodes, claimedNodes, claimedEdges);
-
         md.append("| 구분 | 대상 |\n|---|---|\n");
         featureRows(md, "기능 추가", featureAdded);
         nodeRows(md, "추가", excludingClaimed(declared(diff.addedNodes(), nodes), claimedNodes), name);
@@ -102,12 +112,30 @@ public final class MermaidRenderer {
         return md.toString();
     }
 
+    /** 엔드포인트 하나 · 거기에만 속하는 다운스트림 노드 전부 — 그림의 기능 subgraph 와 표의 "기능 추가/삭제" 행이 같이 씀. */
+    private record Feature(Node entry, List<Node> members) {
+    }
+
+    private static void featureSubgraph(StringBuilder md, Feature f, Function<Node, String> name, GraphDiff diff) {
+        md.append("  subgraph F_").append(mermaidId(f.entry().id())).append("[\"")
+                .append(escape(f.entry().endpoint())).append("\"]\n");
+        f.members().forEach(n -> nodeLine(md, n, name, diff));
+        md.append("  end\n");
+    }
+
+    private static void nodeLine(StringBuilder md, Node n, Function<Node, String> name, GraphDiff diff) {
+        String text = name.apply(n);
+        md.append("    ").append(mermaidId(n.id())).append("[\"")
+                .append(n.endpoint() == null ? text : escape(n.endpoint()) + "<br/>" + text).append("\"]")
+                .append(style(n, diff)).append('\n');
+    }
+
     /**
      * 새로 생기거나 없어진 엔드포인트에서 그 엔드포인트에만 속하는 다운스트림 노드 · 엣지를 하나로 묶는다.
      * 다른 엔드포인트로 이어지는 노드, 두 곳 이상에서 호출이 생기고/사라지는(공유) 노드는 묶지 않고 개별 행으로 남긴다.
      * 라벨은 엔드포인트 그대로.
      */
-    private static List<Node> featureEntries(Set<String> nodeIds, Set<Edge> edgeSet, Map<String, Node> nodes,
+    private static List<Feature> featureEntries(Set<String> nodeIds, Set<Edge> edgeSet, Map<String, Node> nodes,
             Set<String> claimedNodes, Set<Edge> claimedEdges) {
         Map<String, List<Edge>> byFrom = edgeSet.stream().collect(Collectors.groupingBy(Edge::from));
         Map<String, Long> inDegree = edgeSet.stream().collect(Collectors.groupingBy(Edge::to, Collectors.counting()));
@@ -116,7 +144,7 @@ public final class MermaidRenderer {
                 .filter(n -> n.layer() == Layer.CONTROLLER && n.endpoint() != null && declared(n)).toList();
         Set<String> entryIds = entries.stream().map(Node::id).collect(Collectors.toSet());
 
-        List<Node> result = new ArrayList<>();
+        List<Feature> result = new ArrayList<>();
         for (Node entry : entries) {
             if (claimedNodes.contains(entry.id())) {
                 continue;
@@ -139,13 +167,13 @@ public final class MermaidRenderer {
                 byFrom.getOrDefault(id, List.of()).stream().filter(e -> component.contains(e.to()))
                         .forEach(claimedEdges::add);
             }
-            result.add(entry);
+            result.add(new Feature(entry, component.stream().sorted().map(nodes::get).toList()));
         }
         return result;
     }
 
-    private static void featureRows(StringBuilder md, String kind, List<Node> entries) {
-        entries.forEach(n -> md.append("| ").append(kind).append(" | ").append(escape(n.endpoint())).append(" |\n"));
+    private static void featureRows(StringBuilder md, String kind, List<Feature> features) {
+        features.forEach(f -> md.append("| ").append(kind).append(" | ").append(escape(f.entry().endpoint())).append(" |\n"));
     }
 
     private static List<Node> excludingClaimed(List<Node> targets, Set<String> claimed) {

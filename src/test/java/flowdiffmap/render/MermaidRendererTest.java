@@ -144,6 +144,37 @@ class MermaidRendererTest {
     }
 
     @Test
+    void 기능_subgraph_전용_노드는_레이어_subgraph_에서_빠짐() {
+        Node cancelController = new Node("shop.OrderController#cancel/1", "shop.OrderController", "cancel",
+                Layer.CONTROLLER, "DELETE /orders/{id}", "1", "shop/OrderController.java");
+        Graph before = graph(Set.of(), GET, FIND);
+        Graph after = graph(Set.of(edge(cancelController, CANCEL)), GET, FIND, cancelController, CANCEL);
+
+        String md = render(before, after);
+
+        assertThat(md).contains("subgraph F_shop_OrderController_cancel_1[\"DELETE /orders/{id}\"]")
+                .contains("shop_OrderService_cancel_1[\"OrderService.cancel\"]:::added");
+        String serviceBlock = md.substring(md.indexOf("subgraph SERVICE"), md.indexOf("  end", md.indexOf("subgraph SERVICE")));
+        String controllerBlock = md.substring(md.indexOf("subgraph CONTROLLER"), md.indexOf("  end", md.indexOf("subgraph CONTROLLER")));
+        assertThat(serviceBlock).doesNotContain("cancel").contains("OrderService.find");
+        assertThat(controllerBlock).doesNotContain("cancel").contains("OrderController.get");
+    }
+
+    @Test
+    void 범례는_바뀐_것_있을_때만() {
+        Graph before = graph(Set.of(), FIND);
+        Graph after = graph(Set.of(), service("find", 1, "2"));
+
+        assertThat(render(before, after)).contains("subgraph LEGEND[\"범례\"]")
+                .contains("legend_added[\"노드 추가\"]:::added")
+                .contains("legend_removed[\"노드 삭제\"]:::removed")
+                .contains("legend_changed[\"노드 변경\"]:::changed");
+
+        Graph same = graph(Set.of(edge(GET, FIND)), GET, FIND);
+        assertThat(render(same, same)).doesNotContain("LEGEND").doesNotContain("범례");
+    }
+
+    @Test
     void 추가_엣지는_초록_삭제_엣지는_빨간_linkStyle() {
         Graph before = graph(Set.of(edge(GET, CANCEL)), GET, FIND, CANCEL);
         Graph after = graph(Set.of(edge(GET, FIND)), GET, FIND, CANCEL);
