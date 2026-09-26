@@ -267,12 +267,12 @@ public final class MermaidRenderer {
         return edges.stream().filter(e -> !claimed.contains(e)).collect(Collectors.toSet());
     }
 
-    /** {@code 클래스.메서드} · 오버로드가 있는 메서드만 인자 수를 붙인다 — 두 {@code find} 상자가 구분되게. */
+    /** {@code 클래스.메서드} · 오버로드가 있는 메서드만 파라미터 타입을 붙인다 — 두 {@code find} 상자가 구분되게. */
     private static Function<Node, String> namer(Collection<Node> nodes) {
         Map<String, Long> overloads = nodes.stream()
                 .collect(Collectors.groupingBy(n -> n.fqn() + "#" + n.method(), Collectors.counting()));
         return n -> n.fqn().substring(n.fqn().lastIndexOf('.') + 1) + "." + n.method()
-                + (overloads.get(n.fqn() + "#" + n.method()) > 1 ? "/" + n.id().substring(n.id().lastIndexOf('/') + 1) : "");
+                + (overloads.get(n.fqn() + "#" + n.method()) > 1 ? n.id().substring(n.id().indexOf('(')) : "");
     }
 
     /**
@@ -309,9 +309,12 @@ public final class MermaidRenderer {
         return diff.changedNodes().contains(n.id()) ? ":::changed" : "";
     }
 
-    /** {@code shop.order.OrderService#find/1} → {@code shop_order_OrderService_find_1}. */
+    /**
+     * {@code shop.order.OrderService#find(Long)} → {@code shop_order_OrderService_find_Long_}. 밑줄을 먼저 두 겹으로 —
+     * 그대로 두면 {@code f(My_Type)} 과 {@code f(My,Type)} 이 같은 id 가 돼 두 상자가 한 상자로 겹친다.
+     */
     private static String mermaidId(String nodeId) {
-        return nodeId.replaceAll("[^A-Za-z0-9]", "_");
+        return nodeId.replace("_", "__").replaceAll("[^A-Za-z0-9_]", "_");
     }
 
     /** 엔드포인트는 소스의 문자열 리터럴 그대로라 {@code "} 는 노드 문법을 깨고 {@code <>} 는 HTML 태그로 먹힌다. */

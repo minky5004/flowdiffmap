@@ -102,7 +102,7 @@ public class GraphStore {
             for (Edge e : edges) {
                 nodes.computeIfAbsent(e.to(), id -> {
                     Component callee = components.get(fqnOf(id));
-                    String method = id.substring(id.indexOf('#') + 1, id.lastIndexOf('/'));
+                    String method = id.substring(id.indexOf('#') + 1, id.indexOf('('));
                     // 진입 클래스의 상속 메서드는 진입점이 아니다
                     Layer layer = callee.layer() == Layer.ENTRY ? Layer.INTERNAL : callee.layer();
                     return new Node(id, callee.fqn(), method, layer, null, "", callee.file());
@@ -138,6 +138,27 @@ public class GraphStore {
     public boolean has(String sha) throws SQLException {
         try (Connection c = connect()) {
             return exists(c, sha);
+        }
+    }
+
+    /**
+     * {@code files} 의 클래스를 부르는 엣지를 가진 파일(자신 제외) — 엣지 대상 id 에 파라미터 타입이 들어가서, 피호출
+     * 시그니처만 바뀐 커밋에 호출자 행을 부모에서 복사하면 사라진 id 를 가리킨다. 호출자도 다시 파싱하게 이 목록을 쓴다.
+     * 대상 클래스의 파일은 컴포넌트 · 노드 양쪽에서 찾는다 — 선언 노드가 없는 암묵 대상(상속 메서드)도 잡히게.
+     */
+    public Set<String> callerFiles(String sha, Set<String> files) throws SQLException {
+        try (Connection c = connect()) {
+            Array touched = c.createArrayOf("text", files.toArray());
+            Set<String> callers = new HashSet<>();
+            try (ResultSet r = query(c, "SELECT DISTINCT e.file FROM edge e"
+                    + " JOIN (SELECT fqn, file FROM component WHERE commit_sha = ?"
+                    + " UNION SELECT fqn, file FROM node WHERE commit_sha = ?) o ON o.fqn = split_part(e.to_id, '#', 1)"
+                    + " WHERE e.commit_sha = ? AND o.file = ANY(?) AND e.file <> ALL(?)", sha, sha, sha, touched, touched)) {
+                while (r.next()) {
+                    callers.add(r.getString(1));
+                }
+            }
+            return callers;
         }
     }
 
@@ -202,8 +223,14 @@ public class GraphStore {
         return nodeId.substring(0, nodeId.indexOf('#'));
     }
 
+    /**
+     * 스냅샷이 있고 노드 id 가 지금 형식({@code 메서드(타입,…)})인가. 인자 수 형식({@code 메서드/1})의 옛 스냅샷은
+     * 없는 것으로 친다 — 부모로 쓰면 복사된 옛 id 와 새로 파싱한 id 가 섞여 바뀌지 않은 메서드까지 삭제 · 추가로
+     * 칠해진다. 업그레이드 뒤 첫 커밋이 DB 가 꺼져 있던 커밋 뒤처럼 새 베이스라인이 된다.
+     */
     private static boolean exists(Connection c, String sha) throws SQLException {
-        try (ResultSet r = query(c, "SELECT 1 FROM snapshot WHERE commit_sha = ?", sha)) {
+        try (ResultSet r = query(c, "SELECT 1 FROM snapshot WHERE commit_sha = ?"
+                + " AND NOT EXISTS (SELECT 1 FROM node WHERE commit_sha = ? AND id NOT LIKE '%(%')", sha, sha)) {
             return r.next();
         }
     }
