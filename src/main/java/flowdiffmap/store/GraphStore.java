@@ -141,6 +141,27 @@ public class GraphStore {
         }
     }
 
+    /**
+     * {@code files} 의 클래스를 부르는 엣지를 가진 파일(자신 제외) — 엣지 대상 id 에 파라미터 타입이 들어가서, 피호출
+     * 시그니처만 바뀐 커밋에 호출자 행을 부모에서 복사하면 사라진 id 를 가리킨다. 호출자도 다시 파싱하게 이 목록을 쓴다.
+     * 대상 클래스의 파일은 컴포넌트 · 노드 양쪽에서 찾는다 — 선언 노드가 없는 암묵 대상(상속 메서드)도 잡히게.
+     */
+    public Set<String> callerFiles(String sha, Set<String> files) throws SQLException {
+        try (Connection c = connect()) {
+            Array touched = c.createArrayOf("text", files.toArray());
+            Set<String> callers = new HashSet<>();
+            try (ResultSet r = query(c, "SELECT DISTINCT e.file FROM edge e"
+                    + " JOIN (SELECT fqn, file FROM component WHERE commit_sha = ?"
+                    + " UNION SELECT fqn, file FROM node WHERE commit_sha = ?) o ON o.fqn = split_part(e.to_id, '#', 1)"
+                    + " WHERE e.commit_sha = ? AND o.file = ANY(?) AND e.file <> ALL(?)", sha, sha, sha, touched, touched)) {
+                while (r.next()) {
+                    callers.add(r.getString(1));
+                }
+            }
+            return callers;
+        }
+    }
+
     /** 부모 없이 {@code g} 만으로 — 첫 실행 · 루트 커밋의 베이스라인. */
     public void saveFull(String sha, Graph g) throws SQLException {
         saveIncremental(null, sha, Set.of(), g);

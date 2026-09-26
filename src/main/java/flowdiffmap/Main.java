@@ -87,6 +87,12 @@ public final class Main {
                     changed.add(tree.resolve(path));
                 }
             }
+            // 바뀐 파일을 부르는 파일도 다시 — 호출자 엣지의 대상 id 가 피호출 시그니처(파라미터 타입)를 담는다
+            for (String caller : store.callerFiles(parent, touched)) {
+                if (touched.add(caller)) {
+                    changed.add(srcRoot.resolve(caller));
+                }
+            }
             Graph fresh = EMPTY;
             if (!changed.isEmpty()) {
                 FlowExtractor extractor = new FlowExtractor(srcRoot);

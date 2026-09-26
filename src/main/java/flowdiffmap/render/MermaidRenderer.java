@@ -309,9 +309,12 @@ public final class MermaidRenderer {
         return diff.changedNodes().contains(n.id()) ? ":::changed" : "";
     }
 
-    /** {@code shop.order.OrderService#find(Long)} → {@code shop_order_OrderService_find_Long_}. */
+    /**
+     * {@code shop.order.OrderService#find(Long)} → {@code shop_order_OrderService_find_Long_}. 밑줄을 먼저 두 겹으로 —
+     * 그대로 두면 {@code f(My_Type)} 과 {@code f(My,Type)} 이 같은 id 가 돼 두 상자가 한 상자로 겹친다.
+     */
     private static String mermaidId(String nodeId) {
-        return nodeId.replaceAll("[^A-Za-z0-9]", "_");
+        return nodeId.replace("_", "__").replaceAll("[^A-Za-z0-9_]", "_");
     }
 
     /** 엔드포인트는 소스의 문자열 리터럴 그대로라 {@code "} 는 노드 문법을 깨고 {@code <>} 는 HTML 태그로 먹힌다. */

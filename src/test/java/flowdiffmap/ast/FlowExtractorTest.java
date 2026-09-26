@@ -244,8 +244,39 @@ class FlowExtractorTest {
         Graph g = new FlowExtractor(dir).extract(List.of(service, controller));
 
         assertThat(g.edges()).extracting(Edge::from, Edge::to).containsOnly(
-                tuple("shop.C#a(A)", "shop.S#find(A)"),
-                tuple("shop.C#a(A)", "shop.S#find(B)"));
+                tuple("shop.C#a(com.ext.A)", "shop.S#find(com.ext.A)"),
+                tuple("shop.C#a(com.ext.A)", "shop.S#find(com.ext.B)"));
+    }
+
+    @Test
+    void 이름이_같은_두_타입의_오버로드도_다른_노드(@TempDir Path dir) throws IOException {
+        // 단순 이름으로 줄이면 둘 다 f(Id) — 소스가 패키지째 적은 표기를 그대로 둔다
+        Path file = write(dir, "shop/S.java", service("""
+                public void f(com.a.Id id) { }
+                public void f(com.b.Id id) { }
+                """));
+
+        Graph g = new FlowExtractor(dir).extract(List.of(file));
+
+        assertThat(g.nodes()).containsOnlyKeys("shop.S#f(com.a.Id)", "shop.S#f(com.b.Id)");
+    }
+
+    @Test
+    void 가변_인자_호출은_선언된_노드로(@TempDir Path dir) throws IOException {
+        Path service = write(dir, "shop/S.java", service("public void log(String... parts) { }"));
+        Path controller = write(dir, "shop/C.java", """
+                package shop;
+                @RestController
+                public class C {
+                    private final S s = new S();
+                    @GetMapping("/a")
+                    public void a() { s.log("x", "y"); }
+                }
+                """);
+
+        Graph g = new FlowExtractor(dir).extract(List.of(service, controller));
+
+        assertThat(g.edges()).extracting(Edge::from, Edge::to).containsOnly(tuple("shop.C#a()", "shop.S#log(String...)"));
     }
 
     @Test

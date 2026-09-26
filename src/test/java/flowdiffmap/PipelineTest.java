@@ -108,6 +108,24 @@ class PipelineTest {
     }
 
     @Test
+    void 피호출_파라미터_타입만_바뀐_커밋도_호출자_엣지가_새_시그니처로() throws Exception {
+        // 컨트롤러는 그대로 · 서비스만 find(Long) → find(Number) — Long 인자가 그대로 넘어가 호출자는 안 고쳐도 된다
+        commit("v1");
+        Main.run(repo, store);
+        Path service = src("shop/order/OrderService.java");
+        Files.writeString(service, Files.readString(service).replace("public Order find(Long id)", "public Order find(Number id)"));
+        git("commit", "-qam", "widen");
+
+        Main.run(repo, store);
+
+        var g = store.load(head()).orElseThrow();
+        assertThat(g.nodes()).containsKey("shop.order.OrderService#find(Number)")
+                .doesNotContainKey("shop.order.OrderService#find(Long)");
+        assertThat(g.edges()).extracting(e -> e.from() + " -> " + e.to())
+                .contains("shop.order.OrderController#get(Long) -> shop.order.OrderService#find(Number)");
+    }
+
+    @Test
     void 커밋하지_않은_작업_폴더_변경은_스냅샷에_안_들어감() throws Exception {
         commit("v1");
         Main.run(repo, store);

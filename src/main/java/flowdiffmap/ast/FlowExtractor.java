@@ -374,25 +374,28 @@ public class FlowExtractor {
     }
 
     /**
-     * 호출이 가리키는 노드 id. 같은 인자 수의 선언이 하나면 그것 · 여럿(오버로드)이면 심볼 솔버가 고른 것.
+     * 호출이 가리키는 노드 id. 인자 수가 맞는 선언(가변 인자는 고정 파라미터 수 이상)이 하나면 그것 · 여럿(오버로드)이면
+     * 심볼 솔버가 고른 것.
      * 솔버가 못 고르면(인자 타입이 외부 jar) 후보 전부로 잇는다 — 호출을 잃는 것보다 가능한 흐름을 다 그리는 쪽.
      * 선언이 없으면(상속 메서드) 타입 모를 암묵 노드 id.
      */
     private static List<String> calleeIds(MethodCallExpr call, ClassOrInterfaceDeclaration callee) {
         String fqn = callee.getFullyQualifiedName().orElseThrow();
+        int args = call.getArguments().size();
         List<MethodDeclaration> candidates = callee.getMethodsByName(call.getNameAsString()).stream()
-                .filter(m -> m.getParameters().size() == call.getArguments().size())
+                .filter(m -> m.getParameters().size() == args
+                        || m.getParameters().getLast().map(p -> p.isVarArgs()).orElse(false) && args >= m.getParameters().size() - 1)
                 .toList();
         if (candidates.isEmpty()) {
             return List.of(fqn + "#" + call.getNameAsString()
-                    + "(" + String.join(",", Collections.nCopies(call.getArguments().size(), "?")) + ")");
+                    + "(" + String.join(",", Collections.nCopies(args, "?")) + ")");
         }
         if (candidates.size() > 1) {
             try {
-                Optional<?> chosen = call.resolve().toAst();
-                Optional<MethodDeclaration> match = candidates.stream().filter(m -> chosen.orElse(null) == m).findFirst();
-                if (match.isPresent()) {
-                    return List.of(idOf(fqn, match.get()));
+                // 동일성으로 맞춘다 — Node.equals 는 구조 비교라 같은 본문의 다른 선언도 같다고 본다
+                Optional<MethodDeclaration> chosen = call.resolve().toAst(MethodDeclaration.class);
+                if (chosen.isPresent() && candidates.stream().anyMatch(m -> m == chosen.get())) {
+                    return List.of(idOf(fqn, chosen.get()));
                 }
             } catch (RuntimeException e) {
                 // 인자 타입을 풀지 못함 — 아래에서 후보 전부
@@ -403,8 +406,9 @@ public class FlowExtractor {
 
     /**
      * 노드 id — {@code 클래스#메서드(파라미터 타입,…)}. 인자 수만으로 지으면 {@code find(Long)} · {@code find(String)} 이
-     * 한 노드로 합쳐져 하나가 사라진다. 타입은 표기 그대로의 단순 이름(패키지 · 제네릭 인자 제외) — 선언과 호출이
-     * 같은 선언을 거쳐 id 를 지으므로 둘이 갈리지 않는다.
+     * 한 노드로 합쳐져 하나가 사라진다. 타입은 소스 표기 그대로(제네릭 인자만 제외) — 선언과 호출이 같은 선언을 거쳐
+     * id 를 지으므로 둘이 갈리지 않는다. 패키지를 떼지 않는 것은 {@code f(Id)} · {@code f(com.b.Id)} 처럼 이름이 같은
+     * 두 타입의 오버로드 때문이다 — 컴파일되는 소스라면 둘 중 하나는 반드시 패키지째 적혀 있다.
      */
     static String idOf(String fqn, MethodDeclaration m) {
         List<String> types = m.getParameters().stream().map(p -> {
@@ -413,7 +417,6 @@ public class FlowExtractor {
                 prev = t;
                 t = t.replaceAll("<[^<>]*>", "");
             }
-            t = t.substring(t.lastIndexOf('.') + 1);
             return p.isVarArgs() ? t + "..." : t;
         }).toList();
         return fqn + "#" + m.getNameAsString() + "(" + String.join(",", types) + ")";

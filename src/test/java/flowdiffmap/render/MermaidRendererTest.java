@@ -249,6 +249,18 @@ class MermaidRendererTest {
     }
 
     @Test
+    void 밑줄_든_타입과_쉼표로_나뉜_타입은_다른_Mermaid_id() {
+        // 영숫자 밖을 전부 _ 로 바꾸면 둘 다 f_My_Type_ — 한 상자로 겹친다
+        Node joined = new Node("shop.OrderService#f(My_Type)", "shop.OrderService", "f",
+                Layer.SERVICE, null, "1", "shop/OrderService.java");
+        Node split = new Node("shop.OrderService#f(My,Type)", "shop.OrderService", "f",
+                Layer.SERVICE, null, "1", "shop/OrderService.java");
+        Graph g = graph(Set.of(), joined, split);
+
+        assertThat(render(g, g)).contains("shop_OrderService_f_My__Type_[").contains("shop_OrderService_f_My_Type_[");
+    }
+
+    @Test
     void 엔드포인트_속_따옴표_꺾쇠_이스케이프() {
         Node odd = new Node("shop.OrderController#odd()", "shop.OrderController", "odd",
                 Layer.CONTROLLER, "GET /a\"b\"/<c>", "1", "shop/OrderController.java");
