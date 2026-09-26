@@ -18,6 +18,7 @@ import java.util.Set;
 import java.util.TreeSet;
 import java.util.function.Function;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * 두 스냅샷의 diff 를 칠한 Mermaid 흐름도 + 변경 표 마크다운.
@@ -26,6 +27,9 @@ import java.util.stream.Collectors;
  * 출력 파일의 git diff 가 실제 변화 근처에만 생긴다. 엣지 색은 Mermaid 가 순번으로만 받아서 {@code linkStyle} 번호는 밀린다.
  */
 public final class MermaidRenderer {
+
+    /** 한 핵심 노드에서 방향마다 그리는 호출자 · 피호출자 수. */
+    private static final int CONTEXT_LIMIT = 5;
 
     private static final Comparator<Edge> EDGE_ORDER = Comparator.comparing(Edge::from).thenComparing(Edge::to);
 
@@ -44,6 +48,8 @@ public final class MermaidRenderer {
         edges.addAll(after.edges());
         edges.addAll(diff.removedEdges());
         Function<Node, String> name = namer(nodes.values());
+        // 첫 스냅샷 · 빈 diff 는 비교할 변경이 없어 전체 구조 그대로
+        Focus focus = diff.isEmpty() ? new Focus(nodes.keySet(), List.of()) : focus(diff, edges);
 
         // 기능 rollup 은 그림(subgraph 배치)과 표가 같은 판정을 공유 — 여기서 한 번만 계산
         Set<String> claimedNodes = new HashSet<>();
@@ -76,7 +82,7 @@ public final class MermaidRenderer {
         }
         for (Layer layer : Layer.values()) {
             List<Node> inLayer = nodes.values().stream()
-                    .filter(n -> n.layer() == layer && !claimedNodes.contains(n.id()))
+                    .filter(n -> n.layer() == layer && !claimedNodes.contains(n.id()) && focus.shown().contains(n.id()))
                     .sorted(Comparator.comparing(Node::id)).toList();
             if (inLayer.isEmpty()) {
                 continue;
@@ -85,9 +91,13 @@ public final class MermaidRenderer {
             inLayer.forEach(n -> nodeLine(md, n, name, diff));
             md.append("  end\n");
         }
+        focus.more().forEach(m -> md.append("    ").append(m.id()).append("[\"").append(m.text()).append("\"]:::more\n"));
         StringBuilder linkStyles = new StringBuilder();
         int i = 0;
         for (Edge e : edges) {
+            if (!focus.shown().contains(e.from()) || !focus.shown().contains(e.to())) {
+                continue;
+            }
             md.append("    ").append(mermaidId(e.from())).append(" --> ").append(mermaidId(e.to())).append('\n');
             if (diff.addedEdges().contains(e)) {
                 linkStyles.append("  linkStyle ").append(i).append(" stroke:#2a2,stroke-width:2px\n");
@@ -96,13 +106,22 @@ public final class MermaidRenderer {
             }
             i++;
         }
+        // linkStyle 은 전체 화살표 순번으로 매겨서 상자 화살표는 칠하는 화살표 뒤에
+        focus.more().forEach(m -> md.append("    ").append(m.from()).append(" --> ").append(m.to()).append('\n'));
         md.append(linkStyles);
         if (!diff.isEmpty()) {
             md.append("  classDef added fill:#dfd,stroke:#2a2\n")
                     .append("  classDef removed fill:#fdd,stroke:#d33,stroke-dasharray:4\n")
                     .append("  classDef changed fill:#fe8,stroke:#c90\n");
         }
+        if (!focus.more().isEmpty()) {
+            md.append("  classDef more fill:#fff,stroke:#999,stroke-dasharray:3,color:#666\n");
+        }
         md.append("```\n\n");
+        int omitted = nodes.size() - focus.shown().size();
+        if (omitted > 0) {
+            md.append("변경과 무관한 노드 ").append(omitted).append("개 생략\n\n");
+        }
 
         if (diff.isEmpty()) {
             return md.append(before == null ? "첫 스냅샷 · 비교할 부모 없음\n" : "이번 커밋에서 바뀐 흐름 없음\n").toString();
@@ -117,6 +136,55 @@ public final class MermaidRenderer {
         edgeRows(md, "호출 추가", excludingClaimed(diff.addedEdges(), claimedEdges), arrow);
         edgeRows(md, "호출 삭제", excludingClaimed(diff.removedEdges(), claimedEdges), arrow);
         return md.toString();
+    }
+
+    /** 그리는 노드 id · 문맥 상한을 넘친 이웃을 묶은 상자들. */
+    private record Focus(Set<String> shown, List<More> more) {
+    }
+
+    /** {@code … 외 N곳} 상자 — {@code id} 는 Mermaid id · 화살표는 {@code from --> to}. */
+    private record More(String id, String text, String from, String to) {
+    }
+
+    /**
+     * 추가 · 삭제 · 변경된 노드(핵심)와 그 호출자 · 피호출자 한 단계(문맥), 새로 생기거나 없어진 호출의 양 끝만 —
+     * 큰 리포에서 바뀐 곳이 전체 그래프에 묻히지 않게. 호출 끝은 펼치지 않는다 — 새로 불릴 뿐인 공용 유틸의
+     * 원래 호출자들은 이 커밋과 무관하다.
+     * 문맥은 방향마다 이미 그리기로 한 노드를 먼저, 나머지는 id 순으로 {@link #CONTEXT_LIMIT} 개까지 · 그래도 안 그려진 이웃은
+     * 방향마다 상자 하나로 센다 — 다른 핵심 노드의 문맥으로 이미 그려진 이웃은 세지 않는다.
+     */
+    private static Focus focus(GraphDiff diff, Set<Edge> edges) {
+        Set<String> core = new TreeSet<>();
+        core.addAll(diff.addedNodes());
+        core.addAll(diff.removedNodes());
+        core.addAll(diff.changedNodes());
+        Set<String> shown = new HashSet<>(core);
+        Stream.concat(diff.addedEdges().stream(), diff.removedEdges().stream())
+                .forEach(e -> shown.addAll(List.of(e.from(), e.to())));
+        Map<String, List<String>> callers = edges.stream()
+                .collect(Collectors.groupingBy(Edge::to, Collectors.mapping(Edge::from, Collectors.toList())));
+        Map<String, List<String>> callees = edges.stream()
+                .collect(Collectors.groupingBy(Edge::from, Collectors.mapping(Edge::to, Collectors.toList())));
+        Comparator<String> order = Comparator.comparing((String id) -> !shown.contains(id)).thenComparing(Comparator.naturalOrder());
+
+        for (String c : core) {
+            for (Map<String, List<String>> side : List.of(callers, callees)) {
+                side.getOrDefault(c, List.of()).stream().sorted(order).limit(CONTEXT_LIMIT).forEach(shown::add);
+            }
+        }
+        List<More> more = new ArrayList<>();
+        for (String c : core) {
+            String id = mermaidId(c);
+            long in = callers.getOrDefault(c, List.of()).stream().filter(n -> !shown.contains(n)).count();
+            if (in > 0) {
+                more.add(new More("more_in_" + id, "호출자 외 " + in + "곳", "more_in_" + id, id));
+            }
+            long out = callees.getOrDefault(c, List.of()).stream().filter(n -> !shown.contains(n)).count();
+            if (out > 0) {
+                more.add(new More("more_out_" + id, "피호출 외 " + out + "곳", id, "more_out_" + id));
+            }
+        }
+        return new Focus(shown, more);
     }
 
     /** 엔드포인트 또는 진입점 하나 · 거기에만 속하는 다운스트림 노드 전부 — 그림의 기능 subgraph 와 표의 "기능 추가/삭제" 행이 같이 씀. */
