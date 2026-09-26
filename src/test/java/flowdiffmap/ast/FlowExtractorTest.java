@@ -43,15 +43,79 @@ class FlowExtractorTest {
                         tuple(PKG + "OrderService#find/1", Layer.SERVICE, null, "shop/order/OrderService.java"),
                         tuple(PKG + "OrderService#create/1", Layer.SERVICE, null, "shop/order/OrderService.java"),
                         tuple(PKG + "OrderRepository#findByStatus/1", Layer.REPOSITORY, null, "shop/order/OrderRepository.java"),
-                        tuple(PKG + "PaymentRepository#charge/1", Layer.REPOSITORY, null, "shop/order/PaymentRepository.java"));
-        // 엔티티 Order 는 컴포넌트가 아니다
+                        tuple(PKG + "PaymentRepository#charge/1", Layer.REPOSITORY, null, "shop/order/PaymentRepository.java"),
+                        tuple(PKG + "Order#getAmount/0", Layer.INTERNAL, null, "shop/order/Order.java"));
+        // 엔티티 Order 는 INTERNAL 로 저장 — Spring 리포에서는 GraphStore.load 가 거른다
         assertThat(g.components())
                 .extracting(Component::fqn, Component::layer)
                 .containsExactlyInAnyOrder(
                         tuple(PKG + "OrderController", Layer.CONTROLLER),
                         tuple(PKG + "OrderService", Layer.SERVICE),
                         tuple(PKG + "OrderRepository", Layer.REPOSITORY),
-                        tuple(PKG + "PaymentRepository", Layer.REPOSITORY));
+                        tuple(PKG + "PaymentRepository", Layer.REPOSITORY),
+                        tuple(PKG + "Order", Layer.INTERNAL));
+    }
+
+    static final Path PLAIN = Path.of("src/test/resources/fixture/plain");
+
+    @Test
+    void 스프링_아닌_클래스는_진입_또는_내부() throws IOException {
+        Graph g = new FlowExtractor(PLAIN).extract(javaFiles(PLAIN));
+
+        // main · 프레임워크 타입의 @Override 만 진입점 노드 — 진입 클래스의 그 밖 private 아닌 메서드(Bot#status · save)와
+        // Object 메서드 재정의(Bot#toString)는 내부 노드 — 다른 클래스가 부르는 리스너 유틸이 진입 칸 · 빈 해시 암묵 노드로 새지 않게
+        // 소스 안 상위 타입은 거슬러 올라간다(PingCommand → BaseCommand → TimerTask) · Java 25 인스턴스 main(Script)도 진입점
+        // 진입점 아님: 소스 안 인터페이스 구현(PortImpl) · JDK 비콜백 타입 구현(Money) · String[] 아닌 main(Tool) ·
+        // record(Named) · 인터페이스(Port) · 로컬 클래스와 그 안 중첩 클래스(Local · Inner)
+        assertThat(g.nodes().values())
+                .extracting(Node::id, Node::layer, Node::endpoint)
+                .containsExactlyInAnyOrder(
+                        tuple("app.App#main/1", Layer.ENTRY, null),
+                        tuple("app.Bot#run/0", Layer.ENTRY, null),
+                        tuple("app.Bot#status/0", Layer.INTERNAL, null),
+                        tuple("app.Bot#save/0", Layer.INTERNAL, null),
+                        tuple("app.Bot#toString/0", Layer.INTERNAL, null),
+                        tuple("app.PingCommand#run/0", Layer.ENTRY, null),
+                        tuple("app.Script#main/0", Layer.ENTRY, null),
+                        tuple("app.Money#compareTo/1", Layer.INTERNAL, null),
+                        tuple("app.Money#toString/0", Layer.INTERNAL, null),
+                        tuple("app.Tool#main/1", Layer.INTERNAL, null),
+                        tuple("app.Pipeline#run/0", Layer.INTERNAL, null),
+                        tuple("app.Cleaner#clean/0", Layer.INTERNAL, null),
+                        tuple("app.Store#save/0", Layer.INTERNAL, null),
+                        tuple("app.Unused#idle/0", Layer.INTERNAL, null),
+                        tuple("app.PortImpl#send/0", Layer.INTERNAL, null));
+        assertThat(g.components())
+                .extracting(Component::fqn, Component::layer)
+                .containsExactlyInAnyOrder(
+                        tuple("app.App", Layer.ENTRY),
+                        tuple("app.Bot", Layer.ENTRY),
+                        tuple("app.PingCommand", Layer.ENTRY),
+                        tuple("app.Script", Layer.ENTRY),
+                        tuple("app.BaseCommand", Layer.INTERNAL),
+                        tuple("app.Money", Layer.INTERNAL),
+                        tuple("app.Tool", Layer.INTERNAL),
+                        tuple("app.Pipeline", Layer.INTERNAL),
+                        tuple("app.Cleaner", Layer.INTERNAL),
+                        tuple("app.Store", Layer.INTERNAL),
+                        tuple("app.Unused", Layer.INTERNAL),
+                        tuple("app.PortImpl", Layer.INTERNAL));
+    }
+
+    @Test
+    void 스프링_아닌_클래스의_static_호출과_헬퍼_경유_호출도_엣지() throws IOException {
+        Graph g = new FlowExtractor(PLAIN).extract(javaFiles(PLAIN));
+
+        assertThat(g.edges())
+                .extracting(Edge::from, Edge::to)
+                .containsExactlyInAnyOrder(
+                        tuple("app.App#main/1", "app.Pipeline#run/0"),
+                        tuple("app.Pipeline#run/0", "app.Cleaner#clean/0"),
+                        // run → save(같은 클래스 · 엣지 아님) → Store#save — save 가 노드여도 run 의 헬퍼로 흡수돼야
+                        // 진입점에서 닿는 흐름이 끊기지 않는다
+                        tuple("app.Bot#run/0", "app.Store#save/0"),
+                        tuple("app.Bot#save/0", "app.Store#save/0"),
+                        tuple("app.Script#main/0", "app.Store#save/0"));
     }
 
     @Test

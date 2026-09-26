@@ -266,4 +266,36 @@ class MermaidRendererTest {
         assertThat(md).contains("shop_OrderController_get_1 --> shop_OrderService_find_1")
                 .doesNotContain(":::").contains("첫 스냅샷");
     }
+
+    static Node plain(String cls, String method, Layer layer) {
+        return new Node("app." + cls + "#" + method + "/0", "app." + cls, method, layer, null, "1", "app/" + cls + ".java");
+    }
+
+    @Test
+    void 진입_내부_칸은_한글_제목으로_진입이_먼저() {
+        Node main = plain("App", "main", Layer.ENTRY);
+        Node run = plain("Pipeline", "run", Layer.INTERNAL);
+
+        String md = render(null, graph(Set.of(edge(main, run)), main, run));
+
+        assertThat(md).contains("  subgraph ENTRY[\"진입\"]\n    app_App_main_0[\"App.main\"]\n")
+                .contains("  subgraph INTERNAL[\"내부\"]\n    app_Pipeline_run_0[\"Pipeline.run\"]\n");
+        assertThat(md.indexOf("subgraph ENTRY")).isLessThan(md.indexOf("subgraph INTERNAL"));
+    }
+
+    @Test
+    void 새_진입점은_클래스_메서드_라벨로_기능_추가_같은_이름_핸들러도_구분() {
+        Node gift = plain("GiftListener", "onSlash", Layer.ENTRY);
+        Node ego = plain("EgoListener", "onSlash", Layer.ENTRY);
+        Node save = plain("Store", "save", Layer.INTERNAL);
+        Node load = plain("Catalog", "load", Layer.INTERNAL);
+        Graph before = graph(Set.of(edge(gift, load)), gift, load);
+        Graph after = graph(Set.of(edge(gift, load), edge(ego, save)), gift, load, ego, save);
+
+        String md = render(before, after);
+
+        assertThat(md).contains("  subgraph F_app_EgoListener_onSlash_0[\"EgoListener.onSlash\"]\n")
+                .contains("| 기능 추가 | EgoListener.onSlash |")
+                .doesNotContain("| 추가 | Store.save |");
+    }
 }
