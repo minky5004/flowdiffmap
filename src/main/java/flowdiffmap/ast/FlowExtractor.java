@@ -16,6 +16,7 @@ import com.github.javaparser.ast.expr.NormalAnnotationExpr;
 import com.github.javaparser.ast.expr.SingleMemberAnnotationExpr;
 import com.github.javaparser.ast.expr.StringLiteralExpr;
 import com.github.javaparser.ast.nodeTypes.NodeWithAnnotations;
+import com.github.javaparser.ast.type.ClassOrInterfaceType;
 import com.github.javaparser.printer.DefaultPrettyPrinter;
 import com.github.javaparser.printer.configuration.DefaultConfigurationOption;
 import com.github.javaparser.printer.configuration.DefaultPrinterConfiguration;
@@ -42,9 +43,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.stream.Stream;
 
 /**
- * Spring 컴포넌트(Controller · Service · Repository)의 메서드를 노드로, 소스 안 다른 클래스로의 호출을 엣지로 뽑는다.
+ * Spring 컴포넌트(Controller · Service · Repository)와 그 밖의 클래스(진입점 · 내부)의 메서드를 노드로,
+ * 소스 안 다른 클래스로의 호출을 엣지로 뽑는다 — 그림에 넣을 클래스는 {@code GraphStore.load} 가 고른다.
  *
  * <p>호출 대상은 메서드가 아니라 scope 의 타입만 resolve 한다 — 대상 리포의 의존 jar 가 타입 솔버에 없어서
  * {@code orderRepository.save()} 처럼 {@code JpaRepository} 에서 상속한 메서드는 메서드 resolve 가 항상 실패한다.
@@ -93,6 +96,10 @@ public class FlowExtractor {
                 continue;
             }
             for (ClassOrInterfaceDeclaration type : cu.get().findAll(ClassOrInterfaceDeclaration.class)) {
+                if (type.isLocalClassDeclaration()) {
+                    // FQN 이 없다 — 메서드 본문의 일부로 엔트리 해시 · 헬퍼에 이미 들어간다
+                    continue;
+                }
                 Layer layer = layerOf(type);
                 if (layer == null) {
                     continue;
@@ -130,9 +137,13 @@ public class FlowExtractor {
         return Set.copyOf(unparsed);
     }
 
-    /** 컨트롤러는 핸들러 메서드만 · 나머지는 private 이 아닌 메서드. */
+    /** 컨트롤러는 핸들러 메서드만 · 진입점 클래스는 main 과 프레임워크 콜백(@Override)만 · 나머지는 private 이 아닌 메서드. */
     private static boolean isEntry(Layer layer, MethodDeclaration m) {
-        return layer == Layer.CONTROLLER ? mappingOf(m).isPresent() : !m.isPrivate();
+        return switch (layer) {
+            case CONTROLLER -> mappingOf(m).isPresent();
+            case ENTRY -> isMain(m) || m.isAnnotationPresent(Override.class);
+            default -> !m.isPrivate();
+        };
     }
 
     /**
@@ -213,9 +224,39 @@ public class FlowExtractor {
             }
         }
         // Spring Data 리포지토리는 어노테이션 없이 JpaRepository 등을 확장만 하는 경우가 대부분
-        boolean springData = type.isInterface() && type.getExtendedTypes().stream()
-                .anyMatch(t -> t.getNameAsString().endsWith("Repository"));
-        return springData ? Layer.REPOSITORY : null;
+        if (type.isInterface()) {
+            boolean springData = type.getExtendedTypes().stream()
+                    .anyMatch(t -> t.getNameAsString().endsWith("Repository"));
+            return springData ? Layer.REPOSITORY : null;
+        }
+        // Spring 이 아닌 클래스 — 흐름에 넣을지는 GraphStore.load 가 진입점 도달 여부로 정한다
+        return isEntryClass(type) ? Layer.ENTRY : Layer.INTERNAL;
+    }
+
+    /**
+     * {@code main} 이 있거나, 소스 밖 타입(프레임워크의 ListenerAdapter 등)을 상속 · 구현하면서 {@code @Override} 가 있는 클래스.
+     * 소스 안 인터페이스 구현 · {@code toString} 만 재정의한 클래스는 진입점이 아니다.
+     */
+    private static boolean isEntryClass(ClassOrInterfaceDeclaration type) {
+        if (type.getMethods().stream().anyMatch(FlowExtractor::isMain)) {
+            return true;
+        }
+        return Stream.concat(type.getExtendedTypes().stream(), type.getImplementedTypes().stream())
+                .anyMatch(FlowExtractor::outsideSource)
+                && type.getMethods().stream().anyMatch(m -> m.isAnnotationPresent(Override.class));
+    }
+
+    private static boolean isMain(MethodDeclaration m) {
+        return m.isStatic() && m.getNameAsString().equals("main") && m.getParameters().size() == 1;
+    }
+
+    /** resolve 실패(의존 jar 가 타입 솔버에 없음)도 소스 밖. */
+    private static boolean outsideSource(ClassOrInterfaceType t) {
+        try {
+            return t.resolve().asReferenceType().getTypeDeclaration().flatMap(d -> d.toAst()).isEmpty();
+        } catch (RuntimeException e) {
+            return true;
+        }
     }
 
     private static Optional<AnnotationExpr> mappingOf(NodeWithAnnotations<?> target) {

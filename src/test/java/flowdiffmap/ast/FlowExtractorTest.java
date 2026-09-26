@@ -43,15 +43,59 @@ class FlowExtractorTest {
                         tuple(PKG + "OrderService#find/1", Layer.SERVICE, null, "shop/order/OrderService.java"),
                         tuple(PKG + "OrderService#create/1", Layer.SERVICE, null, "shop/order/OrderService.java"),
                         tuple(PKG + "OrderRepository#findByStatus/1", Layer.REPOSITORY, null, "shop/order/OrderRepository.java"),
-                        tuple(PKG + "PaymentRepository#charge/1", Layer.REPOSITORY, null, "shop/order/PaymentRepository.java"));
-        // 엔티티 Order 는 컴포넌트가 아니다
+                        tuple(PKG + "PaymentRepository#charge/1", Layer.REPOSITORY, null, "shop/order/PaymentRepository.java"),
+                        tuple(PKG + "Order#getAmount/0", Layer.INTERNAL, null, "shop/order/Order.java"));
+        // 엔티티 Order 는 INTERNAL 로 저장 — Spring 리포에서는 GraphStore.load 가 거른다
         assertThat(g.components())
                 .extracting(Component::fqn, Component::layer)
                 .containsExactlyInAnyOrder(
                         tuple(PKG + "OrderController", Layer.CONTROLLER),
                         tuple(PKG + "OrderService", Layer.SERVICE),
                         tuple(PKG + "OrderRepository", Layer.REPOSITORY),
-                        tuple(PKG + "PaymentRepository", Layer.REPOSITORY));
+                        tuple(PKG + "PaymentRepository", Layer.REPOSITORY),
+                        tuple(PKG + "Order", Layer.INTERNAL));
+    }
+
+    static final Path PLAIN = Path.of("src/test/resources/fixture/plain");
+
+    @Test
+    void 스프링_아닌_클래스는_진입_또는_내부() throws IOException {
+        Graph g = new FlowExtractor(PLAIN).extract(javaFiles(PLAIN));
+
+        // main · 소스 밖 타입의 @Override 만 진입점 노드 — Bot#status 는 핸들러가 아니라 노드 아님
+        // 소스 안 인터페이스 구현(PortImpl) · record(Named) · 인터페이스(Port) · 로컬 클래스(Local)는 진입점 아님
+        assertThat(g.nodes().values())
+                .extracting(Node::id, Node::layer, Node::endpoint)
+                .containsExactlyInAnyOrder(
+                        tuple("app.App#main/1", Layer.ENTRY, null),
+                        tuple("app.Bot#run/0", Layer.ENTRY, null),
+                        tuple("app.Pipeline#run/0", Layer.INTERNAL, null),
+                        tuple("app.Cleaner#clean/0", Layer.INTERNAL, null),
+                        tuple("app.Store#save/0", Layer.INTERNAL, null),
+                        tuple("app.Unused#idle/0", Layer.INTERNAL, null),
+                        tuple("app.PortImpl#send/0", Layer.INTERNAL, null));
+        assertThat(g.components())
+                .extracting(Component::fqn, Component::layer)
+                .containsExactlyInAnyOrder(
+                        tuple("app.App", Layer.ENTRY),
+                        tuple("app.Bot", Layer.ENTRY),
+                        tuple("app.Pipeline", Layer.INTERNAL),
+                        tuple("app.Cleaner", Layer.INTERNAL),
+                        tuple("app.Store", Layer.INTERNAL),
+                        tuple("app.Unused", Layer.INTERNAL),
+                        tuple("app.PortImpl", Layer.INTERNAL));
+    }
+
+    @Test
+    void 스프링_아닌_클래스의_static_호출과_헬퍼_경유_호출도_엣지() throws IOException {
+        Graph g = new FlowExtractor(PLAIN).extract(javaFiles(PLAIN));
+
+        assertThat(g.edges())
+                .extracting(Edge::from, Edge::to)
+                .containsExactlyInAnyOrder(
+                        tuple("app.App#main/1", "app.Pipeline#run/0"),
+                        tuple("app.Pipeline#run/0", "app.Cleaner#clean/0"),
+                        tuple("app.Bot#run/0", "app.Store#save/0"));
     }
 
     @Test
