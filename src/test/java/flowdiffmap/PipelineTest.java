@@ -103,7 +103,7 @@ class PipelineTest {
 
         Main.run(repo, store);
 
-        assertThat(store.load(head()).orElseThrow().nodes()).containsKey("shop.order.OrderService#find/1");
+        assertThat(store.load(head()).orElseThrow().nodes()).containsKey("shop.order.OrderService#find(Long)");
         assertThat(Files.readString(out)).isEqualTo(before);
     }
 
@@ -122,8 +122,8 @@ class PipelineTest {
         Main.run(repo, store);
 
         assertThat(store.load(head()).orElseThrow().nodes())
-                .containsKey("shop.order.OrderService#cancel/1")
-                .doesNotContainKey("shop.order.OrderService#refund/1");
+                .containsKey("shop.order.OrderService#cancel(Long)")
+                .doesNotContainKey("shop.order.OrderService#refund(Long)");
     }
 
     @Test

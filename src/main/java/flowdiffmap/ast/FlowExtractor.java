@@ -36,6 +36,7 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.HexFormat;
@@ -115,15 +116,15 @@ public class FlowExtractor {
                     }
                     List<MethodDeclaration> reach = withHelpers(type, layer, m);
                     String endpoint = layer == Layer.CONTROLLER ? endpointOf(type, m) : null;
-                    Node node = new Node(idOf(fqn, m.getNameAsString(), m.getParameters().size()),
+                    Node node = new Node(idOf(fqn, m),
                             fqn, m.getNameAsString(), nodeLayer(layer, m), endpoint, hash(reach), rel);
                     nodes.put(node.id(), node);
                     for (MethodDeclaration r : reach) {
                         for (MethodCallExpr call : r.findAll(MethodCallExpr.class)) {
-                            calleeFqn(call)
-                                    .filter(callee -> !callee.equals(fqn))
-                                    .ifPresent(callee -> edges.add(new Edge(node.id(),
-                                            idOf(callee, call.getNameAsString(), call.getArguments().size()), rel)));
+                            callee(call)
+                                    .filter(callee -> !callee.getFullyQualifiedName().orElseThrow().equals(fqn))
+                                    .ifPresent(callee -> calleeIds(call, callee)
+                                            .forEach(to -> edges.add(new Edge(node.id(), to, rel))));
                         }
                     }
                 }
@@ -203,11 +204,11 @@ public class FlowExtractor {
     }
 
     /**
-     * scope 의 타입이 소스 안의 클래스일 때 그 FQN — 컴포넌트가 아니어도 남긴다.
+     * scope 의 타입이 소스 안의 클래스일 때 그 선언 — 컴포넌트가 아니어도 남긴다.
      * 증분 저장에서 callee 파일만 바뀌어 컴포넌트가 되면(어노테이션 추가) 안 바뀐 호출자 엣지가 없어서는 안 되므로,
      * 컴포넌트 여부는 스냅샷을 읽을 때 거른다.
      */
-    private static Optional<String> calleeFqn(MethodCallExpr call) {
+    private static Optional<ClassOrInterfaceDeclaration> callee(MethodCallExpr call) {
         if (call.getScope().isEmpty()) {
             return Optional.empty();
         }
@@ -218,8 +219,8 @@ public class FlowExtractor {
             }
             return type.asReferenceType().getTypeDeclaration()
                     .flatMap(declaration -> declaration.toAst())
-                    .flatMap(ast -> ast instanceof ClassOrInterfaceDeclaration c
-                            ? c.getFullyQualifiedName()
+                    .flatMap(ast -> ast instanceof ClassOrInterfaceDeclaration c && c.getFullyQualifiedName().isPresent()
+                            ? Optional.of(c)
                             : Optional.empty());
         } catch (RuntimeException e) {
             // 외부 jar 타입 · 상속 메서드 체인(findById(id).orElseThrow()) — 레이어 간 호출이 아니라서 버린다
@@ -372,7 +373,49 @@ public class FlowExtractor {
         }
     }
 
-    private static String idOf(String fqn, String method, int arity) {
-        return fqn + "#" + method + "/" + arity;
+    /**
+     * 호출이 가리키는 노드 id. 같은 인자 수의 선언이 하나면 그것 · 여럿(오버로드)이면 심볼 솔버가 고른 것.
+     * 솔버가 못 고르면(인자 타입이 외부 jar) 후보 전부로 잇는다 — 호출을 잃는 것보다 가능한 흐름을 다 그리는 쪽.
+     * 선언이 없으면(상속 메서드) 타입 모를 암묵 노드 id.
+     */
+    private static List<String> calleeIds(MethodCallExpr call, ClassOrInterfaceDeclaration callee) {
+        String fqn = callee.getFullyQualifiedName().orElseThrow();
+        List<MethodDeclaration> candidates = callee.getMethodsByName(call.getNameAsString()).stream()
+                .filter(m -> m.getParameters().size() == call.getArguments().size())
+                .toList();
+        if (candidates.isEmpty()) {
+            return List.of(fqn + "#" + call.getNameAsString()
+                    + "(" + String.join(",", Collections.nCopies(call.getArguments().size(), "?")) + ")");
+        }
+        if (candidates.size() > 1) {
+            try {
+                Optional<?> chosen = call.resolve().toAst();
+                Optional<MethodDeclaration> match = candidates.stream().filter(m -> chosen.orElse(null) == m).findFirst();
+                if (match.isPresent()) {
+                    return List.of(idOf(fqn, match.get()));
+                }
+            } catch (RuntimeException e) {
+                // 인자 타입을 풀지 못함 — 아래에서 후보 전부
+            }
+        }
+        return candidates.stream().map(m -> idOf(fqn, m)).toList();
+    }
+
+    /**
+     * 노드 id — {@code 클래스#메서드(파라미터 타입,…)}. 인자 수만으로 지으면 {@code find(Long)} · {@code find(String)} 이
+     * 한 노드로 합쳐져 하나가 사라진다. 타입은 표기 그대로의 단순 이름(패키지 · 제네릭 인자 제외) — 선언과 호출이
+     * 같은 선언을 거쳐 id 를 지으므로 둘이 갈리지 않는다.
+     */
+    static String idOf(String fqn, MethodDeclaration m) {
+        List<String> types = m.getParameters().stream().map(p -> {
+            String t = p.getType().asString();
+            for (String prev = ""; !t.equals(prev); ) {
+                prev = t;
+                t = t.replaceAll("<[^<>]*>", "");
+            }
+            t = t.substring(t.lastIndexOf('.') + 1);
+            return p.isVarArgs() ? t + "..." : t;
+        }).toList();
+        return fqn + "#" + m.getNameAsString() + "(" + String.join(",", types) + ")";
     }
 }

@@ -102,7 +102,7 @@ public class GraphStore {
             for (Edge e : edges) {
                 nodes.computeIfAbsent(e.to(), id -> {
                     Component callee = components.get(fqnOf(id));
-                    String method = id.substring(id.indexOf('#') + 1, id.lastIndexOf('/'));
+                    String method = id.substring(id.indexOf('#') + 1, id.indexOf('('));
                     // 진입 클래스의 상속 메서드는 진입점이 아니다
                     Layer layer = callee.layer() == Layer.ENTRY ? Layer.INTERNAL : callee.layer();
                     return new Node(id, callee.fqn(), method, layer, null, "", callee.file());
@@ -202,8 +202,14 @@ public class GraphStore {
         return nodeId.substring(0, nodeId.indexOf('#'));
     }
 
+    /**
+     * 스냅샷이 있고 노드 id 가 지금 형식({@code 메서드(타입,…)})인가. 인자 수 형식({@code 메서드/1})의 옛 스냅샷은
+     * 없는 것으로 친다 — 부모로 쓰면 복사된 옛 id 와 새로 파싱한 id 가 섞여 바뀌지 않은 메서드까지 삭제 · 추가로
+     * 칠해진다. 업그레이드 뒤 첫 커밋이 DB 가 꺼져 있던 커밋 뒤처럼 새 베이스라인이 된다.
+     */
     private static boolean exists(Connection c, String sha) throws SQLException {
-        try (ResultSet r = query(c, "SELECT 1 FROM snapshot WHERE commit_sha = ?", sha)) {
+        try (ResultSet r = query(c, "SELECT 1 FROM snapshot WHERE commit_sha = ?"
+                + " AND NOT EXISTS (SELECT 1 FROM node WHERE commit_sha = ? AND id NOT LIKE '%(%')", sha, sha)) {
             return r.next();
         }
     }

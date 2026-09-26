@@ -38,13 +38,13 @@ class FlowExtractorTest {
         assertThat(g.nodes().values())
                 .extracting(Node::id, Node::layer, Node::endpoint, Node::file)
                 .containsExactlyInAnyOrder(
-                        tuple(PKG + "OrderController#get/1", Layer.CONTROLLER, "GET /orders/{id}", "shop/order/OrderController.java"),
-                        tuple(PKG + "OrderController#create/1", Layer.CONTROLLER, "POST /orders", "shop/order/OrderController.java"),
-                        tuple(PKG + "OrderService#find/1", Layer.SERVICE, null, "shop/order/OrderService.java"),
-                        tuple(PKG + "OrderService#create/1", Layer.SERVICE, null, "shop/order/OrderService.java"),
-                        tuple(PKG + "OrderRepository#findByStatus/1", Layer.REPOSITORY, null, "shop/order/OrderRepository.java"),
-                        tuple(PKG + "PaymentRepository#charge/1", Layer.REPOSITORY, null, "shop/order/PaymentRepository.java"),
-                        tuple(PKG + "Order#getAmount/0", Layer.INTERNAL, null, "shop/order/Order.java"));
+                        tuple(PKG + "OrderController#get(Long)", Layer.CONTROLLER, "GET /orders/{id}", "shop/order/OrderController.java"),
+                        tuple(PKG + "OrderController#create(Order)", Layer.CONTROLLER, "POST /orders", "shop/order/OrderController.java"),
+                        tuple(PKG + "OrderService#find(Long)", Layer.SERVICE, null, "shop/order/OrderService.java"),
+                        tuple(PKG + "OrderService#create(Order)", Layer.SERVICE, null, "shop/order/OrderService.java"),
+                        tuple(PKG + "OrderRepository#findByStatus(String)", Layer.REPOSITORY, null, "shop/order/OrderRepository.java"),
+                        tuple(PKG + "PaymentRepository#charge(Order)", Layer.REPOSITORY, null, "shop/order/PaymentRepository.java"),
+                        tuple(PKG + "Order#getAmount()", Layer.INTERNAL, null, "shop/order/Order.java"));
         // 엔티티 Order 는 INTERNAL 로 저장 — Spring 리포에서는 GraphStore.load 가 거른다
         assertThat(g.components())
                 .extracting(Component::fqn, Component::layer)
@@ -70,21 +70,21 @@ class FlowExtractorTest {
         assertThat(g.nodes().values())
                 .extracting(Node::id, Node::layer, Node::endpoint)
                 .containsExactlyInAnyOrder(
-                        tuple("app.App#main/1", Layer.ENTRY, null),
-                        tuple("app.Bot#run/0", Layer.ENTRY, null),
-                        tuple("app.Bot#status/0", Layer.INTERNAL, null),
-                        tuple("app.Bot#save/0", Layer.INTERNAL, null),
-                        tuple("app.Bot#toString/0", Layer.INTERNAL, null),
-                        tuple("app.PingCommand#run/0", Layer.ENTRY, null),
-                        tuple("app.Script#main/0", Layer.ENTRY, null),
-                        tuple("app.Money#compareTo/1", Layer.INTERNAL, null),
-                        tuple("app.Money#toString/0", Layer.INTERNAL, null),
-                        tuple("app.Tool#main/1", Layer.INTERNAL, null),
-                        tuple("app.Pipeline#run/0", Layer.INTERNAL, null),
-                        tuple("app.Cleaner#clean/0", Layer.INTERNAL, null),
-                        tuple("app.Store#save/0", Layer.INTERNAL, null),
-                        tuple("app.Unused#idle/0", Layer.INTERNAL, null),
-                        tuple("app.PortImpl#send/0", Layer.INTERNAL, null));
+                        tuple("app.App#main(String[])", Layer.ENTRY, null),
+                        tuple("app.Bot#run()", Layer.ENTRY, null),
+                        tuple("app.Bot#status()", Layer.INTERNAL, null),
+                        tuple("app.Bot#save()", Layer.INTERNAL, null),
+                        tuple("app.Bot#toString()", Layer.INTERNAL, null),
+                        tuple("app.PingCommand#run()", Layer.ENTRY, null),
+                        tuple("app.Script#main()", Layer.ENTRY, null),
+                        tuple("app.Money#compareTo(Money)", Layer.INTERNAL, null),
+                        tuple("app.Money#toString()", Layer.INTERNAL, null),
+                        tuple("app.Tool#main(int)", Layer.INTERNAL, null),
+                        tuple("app.Pipeline#run()", Layer.INTERNAL, null),
+                        tuple("app.Cleaner#clean()", Layer.INTERNAL, null),
+                        tuple("app.Store#save()", Layer.INTERNAL, null),
+                        tuple("app.Unused#idle()", Layer.INTERNAL, null),
+                        tuple("app.PortImpl#send()", Layer.INTERNAL, null));
         assertThat(g.components())
                 .extracting(Component::fqn, Component::layer)
                 .containsExactlyInAnyOrder(
@@ -109,13 +109,13 @@ class FlowExtractorTest {
         assertThat(g.edges())
                 .extracting(Edge::from, Edge::to)
                 .containsExactlyInAnyOrder(
-                        tuple("app.App#main/1", "app.Pipeline#run/0"),
-                        tuple("app.Pipeline#run/0", "app.Cleaner#clean/0"),
+                        tuple("app.App#main(String[])", "app.Pipeline#run()"),
+                        tuple("app.Pipeline#run()", "app.Cleaner#clean()"),
                         // run → save(같은 클래스 · 엣지 아님) → Store#save — save 가 노드여도 run 의 헬퍼로 흡수돼야
                         // 진입점에서 닿는 흐름이 끊기지 않는다
-                        tuple("app.Bot#run/0", "app.Store#save/0"),
-                        tuple("app.Bot#save/0", "app.Store#save/0"),
-                        tuple("app.Script#main/0", "app.Store#save/0"));
+                        tuple("app.Bot#run()", "app.Store#save()"),
+                        tuple("app.Bot#save()", "app.Store#save()"),
+                        tuple("app.Script#main()", "app.Store#save()"));
     }
 
     @Test
@@ -128,12 +128,12 @@ class FlowExtractorTest {
         assertThat(g.edges())
                 .extracting(Edge::from, Edge::to)
                 .containsExactlyInAnyOrder(
-                        tuple(PKG + "OrderController#get/1", PKG + "OrderService#find/1"),
-                        tuple(PKG + "OrderController#create/1", PKG + "OrderService#create/1"),
-                        tuple(PKG + "OrderService#find/1", PKG + "OrderRepository#findById/1"),
-                        tuple(PKG + "OrderService#create/1", PKG + "PaymentRepository#charge/1"),
-                        tuple(PKG + "OrderService#create/1", PKG + "OrderRepository#save/1"),
-                        tuple(PKG + "OrderService#create/1", PKG + "Order#getAmount/0"));
+                        tuple(PKG + "OrderController#get(Long)", PKG + "OrderService#find(Long)"),
+                        tuple(PKG + "OrderController#create(Order)", PKG + "OrderService#create(Order)"),
+                        tuple(PKG + "OrderService#find(Long)", PKG + "OrderRepository#findById(?)"),
+                        tuple(PKG + "OrderService#create(Order)", PKG + "PaymentRepository#charge(Order)"),
+                        tuple(PKG + "OrderService#create(Order)", PKG + "OrderRepository#save(?)"),
+                        tuple(PKG + "OrderService#create(Order)", PKG + "Order#getAmount()"));
         assertThat(g.edges())
                 .filteredOn(e -> e.from().startsWith(PKG + "OrderService"))
                 .extracting(Edge::file)
@@ -149,7 +149,7 @@ class FlowExtractorTest {
 
         Graph g = new FlowExtractor(root).extract(List.of(broken, outside, good));
 
-        assertThat(g.nodes()).containsOnlyKeys("shop.S#f/0");
+        assertThat(g.nodes()).containsOnlyKeys("shop.S#f()");
     }
 
     @Test
@@ -157,9 +157,9 @@ class FlowExtractorTest {
         // OrderService#create 는 private pay() 를 거쳐 PaymentRepository#charge 를 부른다
         Graph g = extractV1();
 
-        assertThat(g.nodes()).doesNotContainKey(PKG + "OrderService#pay/1");
+        assertThat(g.nodes()).doesNotContainKey(PKG + "OrderService#pay(Order)");
         assertThat(g.edges()).extracting(Edge::from, Edge::to)
-                .contains(tuple(PKG + "OrderService#create/1", PKG + "PaymentRepository#charge/1"));
+                .contains(tuple(PKG + "OrderService#create(Order)", PKG + "PaymentRepository#charge(Order)"));
     }
 
     @Test
@@ -179,11 +179,12 @@ class FlowExtractorTest {
                 private int helper() { return 1; }
                 """);
 
-        String hash = hashOf(dir, base, "shop.S#f/1");
-        assertThat(hashOf(dir, commented, "shop.S#f/1")).isEqualTo(hash);
-        assertThat(hashOf(dir, base.replace("return 1;", "return 2;"), "shop.S#f/1")).as("헬퍼 본문").isNotEqualTo(hash);
-        assertThat(hashOf(dir, base.replace("long x", "int x"), "shop.S#f/1")).as("파라미터 타입").isNotEqualTo(hash);
-        assertThat(hashOf(dir, base.replace("@Transactional", ""), "shop.S#f/1")).as("어노테이션").isNotEqualTo(hash);
+        String hash = hashOf(dir, base, "shop.S#f(long)");
+        assertThat(hashOf(dir, commented, "shop.S#f(long)")).isEqualTo(hash);
+        assertThat(hashOf(dir, base.replace("return 1;", "return 2;"), "shop.S#f(long)")).as("헬퍼 본문").isNotEqualTo(hash);
+        assertThat(hashOf(dir, base.replace("@Transactional", ""), "shop.S#f(long)")).as("어노테이션").isNotEqualTo(hash);
+        // 파라미터 타입은 id 의 일부 — 바꾸면 해시가 아니라 노드가 바뀐다(다른 시그니처 · 삭제 + 추가로 칠해짐)
+        assertThat(hashOf(dir, base.replace("long x", "int x"), "shop.S#f(int)")).as("파라미터 타입").isNotNull();
 
         String query = """
                 package shop;
@@ -192,8 +193,59 @@ class FlowExtractorTest {
                     java.util.List<Object> q();
                 }
                 """;
-        assertThat(hashOf(dir, query.replace("from A", "from B"), "shop.R#q/0"))
-                .as("본문 없는 쿼리 메서드").isNotEqualTo(hashOf(dir, query, "shop.R#q/0"));
+        assertThat(hashOf(dir, query.replace("from A", "from B"), "shop.R#q()"))
+                .as("본문 없는 쿼리 메서드").isNotEqualTo(hashOf(dir, query, "shop.R#q()"));
+    }
+
+    @Test
+    void 인자_수가_같은_오버로드는_다른_노드와_엣지(@TempDir Path dir) throws IOException {
+        // 인자 수만으로 id 를 지으면 find(Long) · find(String) 이 한 노드로 합쳐져 하나가 사라진다
+        Path service = write(dir, "shop/S.java", service("""
+                public int find(Long id) { return 1; }
+                public int find(String name) { return 2; }
+                """));
+        Path controller = write(dir, "shop/C.java", """
+                package shop;
+                @RestController
+                public class C {
+                    private final S s = new S();
+                    @GetMapping("/a")
+                    public int a() { return s.find(Long.valueOf(1)); }
+                    @GetMapping("/b")
+                    public int b() { return s.find("x"); }
+                }
+                """);
+
+        Graph g = new FlowExtractor(dir).extract(List.of(service, controller));
+
+        assertThat(g.nodes()).containsKeys("shop.S#find(Long)", "shop.S#find(String)");
+        assertThat(g.edges()).extracting(Edge::from, Edge::to).containsOnly(
+                tuple("shop.C#a()", "shop.S#find(Long)"),
+                tuple("shop.C#b()", "shop.S#find(String)"));
+    }
+
+    @Test
+    void 대상을_못_고른_오버로드_호출은_후보_전부로(@TempDir Path dir) throws IOException {
+        // 인자 타입이 소스 밖(jar)이면 솔버가 오버로드를 못 고른다 — 호출을 잃는 것보다 가능한 흐름을 다 잇는 쪽
+        Path service = write(dir, "shop/S.java", service("""
+                public int find(com.ext.A a) { return 1; }
+                public int find(com.ext.B b) { return 2; }
+                """));
+        Path controller = write(dir, "shop/C.java", """
+                package shop;
+                @RestController
+                public class C {
+                    private final S s = new S();
+                    @GetMapping("/a")
+                    public int a(com.ext.A x) { return s.find(x); }
+                }
+                """);
+
+        Graph g = new FlowExtractor(dir).extract(List.of(service, controller));
+
+        assertThat(g.edges()).extracting(Edge::from, Edge::to).containsOnly(
+                tuple("shop.C#a(A)", "shop.S#find(A)"),
+                tuple("shop.C#a(A)", "shop.S#find(B)"));
     }
 
     @Test
@@ -210,7 +262,7 @@ class FlowExtractorTest {
 
         Graph g = new FlowExtractor(dir).extract(List.of(file));
 
-        assertThat(g.nodes().get("shop.C#s/0").endpoint()).isEqualTo("GET,POST /c/s");
+        assertThat(g.nodes().get("shop.C#s()").endpoint()).isEqualTo("GET,POST /c/s");
     }
 
     static String service(String members) {

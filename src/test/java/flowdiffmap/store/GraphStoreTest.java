@@ -35,7 +35,7 @@ class GraphStoreTest {
     GraphStore store;
 
     static Node node(Component c, String method, String hash) {
-        return new Node(c.fqn() + "#" + method + "/0", c.fqn(), method, c.layer(), null, hash, c.file());
+        return new Node(c.fqn() + "#" + method + "()", c.fqn(), method, c.layer(), null, hash, c.file());
     }
 
     static Edge edge(Node from, String to) {
@@ -58,7 +58,7 @@ class GraphStoreTest {
         }
         store = new GraphStore(PG.getJdbcUrl(), PG.getUsername(), PG.getPassword());
         store.saveFull("p", graph(Set.of(C, S, R),
-                Set.of(edge(GET, FIND.id()), edge(FIND, "shop.R#findById/1")),
+                Set.of(edge(GET, FIND.id()), edge(FIND, "shop.R#findById(?)")),
                 GET, FIND, OLD));
     }
 
@@ -66,7 +66,7 @@ class GraphStoreTest {
     void 부모_복사_후_바뀐_파일만_교체() throws SQLException {
         Node add = node(S, "add", "1");
         store.saveIncremental("p", "c", Set.of(S.file()),
-                graph(Set.of(S), Set.of(edge(FIND, "shop.R#findById/1")), FIND, add));
+                graph(Set.of(S), Set.of(edge(FIND, "shop.R#findById(?)")), FIND, add));
 
         Graph g = store.load("c").orElseThrow();
 
@@ -77,8 +77,8 @@ class GraphStoreTest {
                         tuple(GET.id(), Layer.CONTROLLER),
                         tuple(FIND.id(), Layer.SERVICE),
                         tuple(add.id(), Layer.SERVICE),
-                        tuple("shop.R#findById/1", Layer.REPOSITORY));
-        assertThat(g.edges()).containsExactlyInAnyOrder(edge(GET, FIND.id()), edge(FIND, "shop.R#findById/1"));
+                        tuple("shop.R#findById(?)", Layer.REPOSITORY));
+        assertThat(g.edges()).containsExactlyInAnyOrder(edge(GET, FIND.id()), edge(FIND, "shop.R#findById(?)"));
         // 부모 스냅샷은 그대로
         assertThat(store.load("p").orElseThrow().nodes()).containsKey(OLD.id());
     }
@@ -90,7 +90,7 @@ class GraphStoreTest {
         Graph g = store.load("c").orElseThrow();
 
         assertThat(g.nodes()).doesNotContainKey(GET.id());
-        assertThat(g.edges()).containsExactly(edge(FIND, "shop.R#findById/1"));
+        assertThat(g.edges()).containsExactly(edge(FIND, "shop.R#findById(?)"));
         assertThat(g.components()).containsExactlyInAnyOrder(S, R);
     }
 
@@ -102,7 +102,7 @@ class GraphStoreTest {
         Graph g = store.load("c").orElseThrow();
 
         assertThat(g.edges()).containsExactly(edge(GET, FIND.id()));
-        assertThat(g.nodes()).doesNotContainKey("shop.R#findById/1");
+        assertThat(g.nodes()).doesNotContainKey("shop.R#findById(?)");
     }
 
     @Test
@@ -165,17 +165,17 @@ class GraphStoreTest {
         // Pipeline ↔ Back 순환 · Lib#inherited · App#inherited 는 노드 행 없는 암묵 노드 · Unused 는 아무도 안 부름
         store.saveFull("n", graph(Set.of(app, pipe, back, lib, unused),
                 Set.of(edge(main, run.id()), edge(run, call.id()), edge(call, run.id()),
-                        edge(run, "app.Lib#inherited/0"), edge(run, "app.App#inherited/0"), edge(idle, run.id())),
+                        edge(run, "app.Lib#inherited()"), edge(run, "app.App#inherited()"), edge(idle, run.id())),
                 main, run, call, idle));
 
         Graph g = store.load("n").orElseThrow();
 
-        assertThat(g.nodes()).containsOnlyKeys(main.id(), run.id(), call.id(), "app.Lib#inherited/0", "app.App#inherited/0");
-        assertThat(g.nodes().get("app.Lib#inherited/0").layer()).isEqualTo(Layer.INTERNAL);
+        assertThat(g.nodes()).containsOnlyKeys(main.id(), run.id(), call.id(), "app.Lib#inherited()", "app.App#inherited()");
+        assertThat(g.nodes().get("app.Lib#inherited()").layer()).isEqualTo(Layer.INTERNAL);
         // 진입 클래스의 상속 메서드는 진입점이 아니다 — 진입 칸에 빈 해시 노드로 서지 않게
-        assertThat(g.nodes().get("app.App#inherited/0").layer()).isEqualTo(Layer.INTERNAL);
+        assertThat(g.nodes().get("app.App#inherited()").layer()).isEqualTo(Layer.INTERNAL);
         assertThat(g.edges()).containsExactlyInAnyOrder(edge(main, run.id()), edge(run, call.id()),
-                edge(call, run.id()), edge(run, "app.Lib#inherited/0"), edge(run, "app.App#inherited/0"));
+                edge(call, run.id()), edge(run, "app.Lib#inherited()"), edge(run, "app.App#inherited()"));
         assertThat(g.components()).containsExactlyInAnyOrder(app, pipe, back, lib);
     }
 
@@ -193,5 +193,16 @@ class GraphStoreTest {
     @Test
     void 없는_커밋은_empty() throws SQLException {
         assertThat(store.load("nope")).isEmpty();
+    }
+
+    @Test
+    void 인자_수_형식의_옛_스냅샷은_없는_것으로() throws SQLException {
+        // 옛 id(메서드/인자 수)가 남은 부모를 이어 쓰면 새로 파싱한 id 와 섞여 안 바뀐 메서드까지 삭제 · 추가로 칠해진다
+        try (var c = DriverManager.getConnection(PG.getJdbcUrl(), PG.getUsername(), PG.getPassword())) {
+            c.createStatement().execute("UPDATE node SET id = replace(id, '()', '/0') WHERE commit_sha = 'p'");
+        }
+
+        assertThat(store.has("p")).isFalse();
+        assertThat(store.load("p")).isEmpty();
     }
 }
