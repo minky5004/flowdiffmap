@@ -1,6 +1,6 @@
 # flowdiffmap
 
-> 부모 커밋 대비 바뀐 메서드 · 호출만 칠한 Spring Boot 요청 흐름도(Controller → Service → Repository)를 커밋마다 쓰는 post-commit 훅
+> 부모 커밋 대비 바뀐 메서드 · 호출만 칠한 Java 흐름도(Spring Boot 는 Controller → Service → Repository · 그 밖은 main · 리스너 진입점부터)를 커밋마다 쓰는 post-commit 훅
 
 단일 모듈 `src/main/java` 대상 · 앱 실행 없는 소스 정적 분석 · 결과 파일 쓰기까지만 · 커밋은 사람 몫 — 훅 커밋 → 훅 재실행 루프 회피
 
@@ -11,8 +11,8 @@
 ## 주요 기능
 
 - 레이어 나열 대신 새·삭제 엔드포인트별 기능 단위 박스 · 범례
-- 작업 폴더가 아닌 커밋된 blob 기준 파싱 — `git add -p` 부분 커밋에도 어긋나지 않는 스냅샷
-- 커밋별 스냅샷 PostgreSQL 저장 · 바뀐 파일만 다시 파싱
+- 어노테이션 없는 리포용 main · 리스너 콜백 기점 흐름도 — 호출이 닿는 클래스만
+- 작업 폴더가 아닌 커밋된 blob 기준 · 바뀐 파일만 다시 파싱한 커밋별 PostgreSQL 스냅샷 — `git add -p` 부분 커밋에도 어긋나지 않는 흐름
 - 문서 · DTO 만 바뀐 커밋에 덮이지 않는 직전 흐름도
 - 부모 커밋 흐름을 이어받는 문법 오류 파일 · DB 다운 뒤 새 베이스라인이 되는 첫 커밋 — 경고는 `.git/flowdiffmap.log`
 
@@ -35,7 +35,7 @@ Git Bash 기준 · JDK 21 · Docker 필요
 git clone https://github.com/minky5004/flowdiffmap.git && cd flowdiffmap
 docker compose up -d                                        # PostgreSQL → localhost:5432
 ./gradlew installDist                                       # → build/install/flowdiffmap
-hooks/install.sh /path/to/spring-repo                       # 배포본 경로를 박은 post-commit 훅 · 기존 훅 보존
+hooks/install.sh /path/to/java-repo                         # 배포본 경로를 박은 post-commit 훅 · 기존 훅 보존
 ```
 
 이후 대상 리포 커밋마다 `docs/flow/request-flow.md` 갱신 · 추적 안 된 파일로 남는 출력
@@ -44,9 +44,9 @@ hooks/install.sh /path/to/spring-repo                       # 배포본 경로�
 
 ```
 Main              훅 진입점 · 커밋 blob 풀기 · 부모 대비 비교
-ast/              Controller · Service · Repository 판별 · 매핑 · 호출 엣지 추출
+ast/              Spring 레이어 · 진입점 판별 · 매핑 · 호출 엣지 추출
 graph/            노드 · 엣지 그래프 · 두 커밋 사이 diff
-store/            커밋별 스냅샷 저장 · 부모 행 복사 + 바뀐 파일만 교체
+store/            커밋별 스냅샷 저장 · 부모 행 복사 + 바뀐 파일만 교체 · 읽을 때 진입점 도달 필터
 render/           Mermaid 흐름도 + 변경 표
 hooks/post-commit 훅 스크립트 · 실패해도 종료 코드 0
 hooks/install.sh  배포본 경로가 박힌 훅의 설치 스크립트
