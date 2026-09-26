@@ -135,6 +135,60 @@ class GraphStoreTest {
     }
 
     @Test
+    void 스프링_리포에서는_진입_내부_클래스를_버림() throws SQLException {
+        Component app = new Component("shop.App", Layer.ENTRY, "shop/App.java");
+        Component order = new Component("shop.Order", Layer.INTERNAL, "shop/Order.java");
+        Node main = node(app, "main", "1");
+        Node amount = node(order, "getAmount", "1");
+        store.saveFull("s", graph(Set.of(C, S, app, order),
+                Set.of(edge(GET, FIND.id()), edge(main, FIND.id()), edge(FIND, amount.id())),
+                GET, FIND, main, amount));
+
+        Graph g = store.load("s").orElseThrow();
+
+        assertThat(g.nodes()).containsOnlyKeys(GET.id(), FIND.id());
+        assertThat(g.edges()).containsExactly(edge(GET, FIND.id()));
+        assertThat(g.components()).containsExactlyInAnyOrder(C, S);
+    }
+
+    @Test
+    void 스프링_아닌_리포는_진입점에서_닿는_것만() throws SQLException {
+        Component app = new Component("app.App", Layer.ENTRY, "app/App.java");
+        Component pipe = new Component("app.Pipeline", Layer.INTERNAL, "app/Pipeline.java");
+        Component back = new Component("app.Back", Layer.INTERNAL, "app/Back.java");
+        Component lib = new Component("app.Lib", Layer.INTERNAL, "app/Lib.java");
+        Component unused = new Component("app.Unused", Layer.INTERNAL, "app/Unused.java");
+        Node main = node(app, "main", "1");
+        Node run = node(pipe, "run", "1");
+        Node call = node(back, "call", "1");
+        Node idle = node(unused, "idle", "1");
+        // Pipeline ↔ Back 순환 · Lib#inherited 는 노드 행 없는 암묵 노드 · Unused 는 아무도 안 부름
+        store.saveFull("n", graph(Set.of(app, pipe, back, lib, unused),
+                Set.of(edge(main, run.id()), edge(run, call.id()), edge(call, run.id()),
+                        edge(run, "app.Lib#inherited/0"), edge(idle, run.id())),
+                main, run, call, idle));
+
+        Graph g = store.load("n").orElseThrow();
+
+        assertThat(g.nodes()).containsOnlyKeys(main.id(), run.id(), call.id(), "app.Lib#inherited/0");
+        assertThat(g.nodes().get("app.Lib#inherited/0").layer()).isEqualTo(Layer.INTERNAL);
+        assertThat(g.edges()).containsExactlyInAnyOrder(edge(main, run.id()), edge(run, call.id()),
+                edge(call, run.id()), edge(run, "app.Lib#inherited/0"));
+        assertThat(g.components()).containsExactlyInAnyOrder(app, pipe, back, lib);
+    }
+
+    @Test
+    void 진입점_없는_스프링_아닌_리포는_빈_그래프() throws SQLException {
+        Component lib = new Component("app.Lib", Layer.INTERNAL, "app/Lib.java");
+        store.saveFull("l", graph(Set.of(lib), Set.of(), node(lib, "call", "1")));
+
+        Graph g = store.load("l").orElseThrow();
+
+        assertThat(g.nodes()).isEmpty();
+        assertThat(g.edges()).isEmpty();
+    }
+
+    @Test
     void 없는_커밋은_empty() throws SQLException {
         assertThat(store.load("nope")).isEmpty();
     }

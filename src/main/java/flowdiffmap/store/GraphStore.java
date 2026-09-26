@@ -15,12 +15,17 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.util.ArrayDeque;
+import java.util.Deque;
+import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * 커밋별 그래프 전체 스냅샷을 PostgreSQL 에 둔다.
@@ -34,6 +39,8 @@ public class GraphStore {
     private static final String COMPONENT = "commit_sha, fqn, layer, file";
     private static final String NODE = "commit_sha, id, fqn, method, layer, endpoint, body_hash, file";
     private static final String EDGE = "commit_sha, from_id, to_id, file";
+
+    private static final Set<Layer> SPRING = EnumSet.of(Layer.CONTROLLER, Layer.SERVICE, Layer.REPOSITORY);
 
     private final String url;
     private final String user;
@@ -56,6 +63,8 @@ public class GraphStore {
      * 엣지는 callee 가 이 커밋의 컴포넌트인 것만 남긴다 — 저장은 소스 안 모든 클래스로의 호출을 두어서,
      * callee 파일만 바뀌어 컴포넌트가 되거나 그만두어도 안 바뀐 호출자 쪽 엣지가 맞게 읽힌다.
      * 엣지만 있고 선언이 없는 callee(상속 메서드)는 callee 컴포넌트의 레이어로 암묵 노드를 채운다.
+     * Spring 컴포넌트가 있는 리포는 진입 · 내부 클래스를 버리고, 없는 리포는 진입점에서 호출로 닿는 것만 남긴다 —
+     * 도달 여부는 그래프 전체를 봐야 알 수 있어 바뀐 파일만 뽑는 저장 쪽이 아니라 여기서 판정한다.
      */
     public Optional<Graph> load(String sha) throws SQLException {
         try (Connection c = connect()) {
@@ -75,11 +84,17 @@ public class GraphStore {
                             Layer.valueOf(r.getString(4)), r.getString(5), r.getString(6), r.getString(7)));
                 }
             }
+            boolean spring = components.values().stream().anyMatch(k -> SPRING.contains(k.layer()));
+            if (spring) {
+                // 진입 · 내부 클래스(@SpringBootApplication main · 엔티티 · 설정)는 그림 밖
+                components.values().removeIf(k -> !SPRING.contains(k.layer()));
+                nodes.values().removeIf(n -> !components.containsKey(n.fqn()));
+            }
             Set<Edge> edges = new HashSet<>();
             try (ResultSet r = query(c, "SELECT from_id, to_id, file FROM edge WHERE commit_sha = ?", sha)) {
                 while (r.next()) {
                     Edge e = new Edge(r.getString(1), r.getString(2), r.getString(3));
-                    if (components.containsKey(fqnOf(e.to()))) {
+                    if (components.containsKey(fqnOf(e.from())) && components.containsKey(fqnOf(e.to()))) {
                         edges.add(e);
                     }
                 }
@@ -91,8 +106,31 @@ public class GraphStore {
                     return new Node(id, callee.fqn(), method, callee.layer(), null, "", callee.file());
                 });
             }
+            if (!spring) {
+                Set<String> reached = reachableFromEntries(nodes, edges);
+                nodes.keySet().retainAll(reached);
+                edges.removeIf(e -> !reached.contains(e.from()));
+                Set<String> fqns = nodes.values().stream().map(Node::fqn).collect(Collectors.toSet());
+                components.keySet().retainAll(fqns);
+            }
             return Optional.of(new Graph(nodes, edges, Set.copyOf(components.values())));
         }
+    }
+
+    /** ENTRY 노드에서 엣지를 따라 닿는 노드 id — 순환은 방문 집합이 끊는다. */
+    private static Set<String> reachableFromEntries(Map<String, Node> nodes, Set<Edge> edges) {
+        Map<String, List<String>> callees = edges.stream()
+                .collect(Collectors.groupingBy(Edge::from, Collectors.mapping(Edge::to, Collectors.toList())));
+        Set<String> reached = new HashSet<>();
+        Deque<String> queue = new ArrayDeque<>();
+        nodes.values().stream().filter(n -> n.layer() == Layer.ENTRY).forEach(n -> queue.add(n.id()));
+        while (!queue.isEmpty()) {
+            String id = queue.poll();
+            if (reached.add(id)) {
+                queue.addAll(callees.getOrDefault(id, List.of()));
+            }
+        }
+        return reached;
     }
 
     public boolean has(String sha) throws SQLException {
