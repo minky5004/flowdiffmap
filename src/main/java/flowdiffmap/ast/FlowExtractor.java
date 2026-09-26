@@ -107,13 +107,13 @@ public class FlowExtractor {
                 String fqn = type.getFullyQualifiedName().orElseThrow();
                 components.add(new Component(fqn, layer, rel));
                 for (MethodDeclaration m : type.getMethods()) {
-                    if (!isEntry(layer, m)) {
+                    if (!isNode(layer, m)) {
                         continue;
                     }
                     List<MethodDeclaration> reach = withHelpers(type, layer, m);
                     String endpoint = layer == Layer.CONTROLLER ? endpointOf(type, m) : null;
                     Node node = new Node(idOf(fqn, m.getNameAsString(), m.getParameters().size()),
-                            fqn, m.getNameAsString(), layer, endpoint, hash(reach), rel);
+                            fqn, m.getNameAsString(), nodeLayer(layer, m), endpoint, hash(reach), rel);
                     nodes.put(node.id(), node);
                     for (MethodDeclaration r : reach) {
                         for (MethodCallExpr call : r.findAll(MethodCallExpr.class)) {
@@ -137,13 +137,30 @@ public class FlowExtractor {
         return Set.copyOf(unparsed);
     }
 
-    /** 컨트롤러는 핸들러 메서드만 · 진입점 클래스는 main 과 프레임워크 콜백(@Override)만 · 나머지는 private 이 아닌 메서드. */
+    /** 헬퍼로 흡수되지 않는 메서드 — 컨트롤러는 핸들러만 · 진입점 클래스는 main 과 프레임워크 콜백(@Override)만 · 나머지는 private 이 아닌 메서드. */
     private static boolean isEntry(Layer layer, MethodDeclaration m) {
         return switch (layer) {
             case CONTROLLER -> mappingOf(m).isPresent();
             case ENTRY -> isMain(m) || m.isAnnotationPresent(Override.class);
             default -> !m.isPrivate();
         };
+    }
+
+    /**
+     * 노드가 되는 메서드 — 진입점 클래스는 콜백 밖의 private 아닌 메서드도(다른 클래스가 부르는 리스너 유틸).
+     * 그 메서드는 같은 클래스 콜백의 헬퍼로도 흡수된다 — 같은 클래스 안 호출은 엣지가 아니라서, 흡수하지 않으면
+     * 콜백에서 그 메서드를 거쳐 나가는 호출이 진입점 도달 판정에서 끊긴다.
+     */
+    private static boolean isNode(Layer layer, MethodDeclaration m) {
+        return isEntry(layer, m) || layer == Layer.ENTRY && !m.isPrivate();
+    }
+
+    /**
+     * 진입점 클래스에서 진입점은 main 과 프레임워크 콜백(@Override)뿐 — 다른 클래스가 부르는 리스너의 public 유틸은
+     * 내부 노드라야 진입 칸에 서지 않고 본문 변경도 제 노드에 칠해진다.
+     */
+    private static Layer nodeLayer(Layer layer, MethodDeclaration m) {
+        return layer == Layer.ENTRY && !isMain(m) && !m.isAnnotationPresent(Override.class) ? Layer.INTERNAL : layer;
     }
 
     /**

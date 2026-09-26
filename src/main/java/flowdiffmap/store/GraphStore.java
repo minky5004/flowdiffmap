@@ -103,7 +103,9 @@ public class GraphStore {
                 nodes.computeIfAbsent(e.to(), id -> {
                     Component callee = components.get(fqnOf(id));
                     String method = id.substring(id.indexOf('#') + 1, id.lastIndexOf('/'));
-                    return new Node(id, callee.fqn(), method, callee.layer(), null, "", callee.file());
+                    // 진입 클래스의 상속 메서드는 진입점이 아니다
+                    Layer layer = callee.layer() == Layer.ENTRY ? Layer.INTERNAL : callee.layer();
+                    return new Node(id, callee.fqn(), method, layer, null, "", callee.file());
                 });
             }
             if (!spring) {

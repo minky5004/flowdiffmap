@@ -62,13 +62,16 @@ class FlowExtractorTest {
     void 스프링_아닌_클래스는_진입_또는_내부() throws IOException {
         Graph g = new FlowExtractor(PLAIN).extract(javaFiles(PLAIN));
 
-        // main · 소스 밖 타입의 @Override 만 진입점 노드 — Bot#status 는 핸들러가 아니라 노드 아님
+        // main · 소스 밖 타입의 @Override 만 진입점 노드 — 진입 클래스의 그 밖 private 아닌 메서드(Bot#status · save)는
+        // 내부 노드 — 다른 클래스가 부르는 리스너 유틸이 진입 칸 · 빈 해시 암묵 노드로 새지 않게
         // 소스 안 인터페이스 구현(PortImpl) · record(Named) · 인터페이스(Port) · 로컬 클래스(Local)는 진입점 아님
         assertThat(g.nodes().values())
                 .extracting(Node::id, Node::layer, Node::endpoint)
                 .containsExactlyInAnyOrder(
                         tuple("app.App#main/1", Layer.ENTRY, null),
                         tuple("app.Bot#run/0", Layer.ENTRY, null),
+                        tuple("app.Bot#status/0", Layer.INTERNAL, null),
+                        tuple("app.Bot#save/0", Layer.INTERNAL, null),
                         tuple("app.Pipeline#run/0", Layer.INTERNAL, null),
                         tuple("app.Cleaner#clean/0", Layer.INTERNAL, null),
                         tuple("app.Store#save/0", Layer.INTERNAL, null),
@@ -95,7 +98,10 @@ class FlowExtractorTest {
                 .containsExactlyInAnyOrder(
                         tuple("app.App#main/1", "app.Pipeline#run/0"),
                         tuple("app.Pipeline#run/0", "app.Cleaner#clean/0"),
-                        tuple("app.Bot#run/0", "app.Store#save/0"));
+                        // run → save(같은 클래스 · 엣지 아님) → Store#save — save 가 노드여도 run 의 헬퍼로 흡수돼야
+                        // 진입점에서 닿는 흐름이 끊기지 않는다
+                        tuple("app.Bot#run/0", "app.Store#save/0"),
+                        tuple("app.Bot#save/0", "app.Store#save/0"));
     }
 
     @Test

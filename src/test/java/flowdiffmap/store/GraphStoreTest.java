@@ -162,18 +162,20 @@ class GraphStoreTest {
         Node run = node(pipe, "run", "1");
         Node call = node(back, "call", "1");
         Node idle = node(unused, "idle", "1");
-        // Pipeline ↔ Back 순환 · Lib#inherited 는 노드 행 없는 암묵 노드 · Unused 는 아무도 안 부름
+        // Pipeline ↔ Back 순환 · Lib#inherited · App#inherited 는 노드 행 없는 암묵 노드 · Unused 는 아무도 안 부름
         store.saveFull("n", graph(Set.of(app, pipe, back, lib, unused),
                 Set.of(edge(main, run.id()), edge(run, call.id()), edge(call, run.id()),
-                        edge(run, "app.Lib#inherited/0"), edge(idle, run.id())),
+                        edge(run, "app.Lib#inherited/0"), edge(run, "app.App#inherited/0"), edge(idle, run.id())),
                 main, run, call, idle));
 
         Graph g = store.load("n").orElseThrow();
 
-        assertThat(g.nodes()).containsOnlyKeys(main.id(), run.id(), call.id(), "app.Lib#inherited/0");
+        assertThat(g.nodes()).containsOnlyKeys(main.id(), run.id(), call.id(), "app.Lib#inherited/0", "app.App#inherited/0");
         assertThat(g.nodes().get("app.Lib#inherited/0").layer()).isEqualTo(Layer.INTERNAL);
+        // 진입 클래스의 상속 메서드는 진입점이 아니다 — 진입 칸에 빈 해시 노드로 서지 않게
+        assertThat(g.nodes().get("app.App#inherited/0").layer()).isEqualTo(Layer.INTERNAL);
         assertThat(g.edges()).containsExactlyInAnyOrder(edge(main, run.id()), edge(run, call.id()),
-                edge(call, run.id()), edge(run, "app.Lib#inherited/0"));
+                edge(call, run.id()), edge(run, "app.Lib#inherited/0"), edge(run, "app.App#inherited/0"));
         assertThat(g.components()).containsExactlyInAnyOrder(app, pipe, back, lib);
     }
 

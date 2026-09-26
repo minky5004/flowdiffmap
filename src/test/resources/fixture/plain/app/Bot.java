@@ -15,7 +15,7 @@ public class Bot extends TimerTask {
         return "ok";
     }
 
-    private void save() {
+    void save() {
         store.save();
     }
 }
