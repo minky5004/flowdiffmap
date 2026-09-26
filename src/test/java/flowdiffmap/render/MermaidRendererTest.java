@@ -41,8 +41,9 @@ class MermaidRendererTest {
 
     @Test
     void 추가_노드에_added() {
+        // 기존 get 이 새 cancel 을 부름 — 변경에 이어진 기존 노드는 색 없이 그대로 그려진다
         Graph before = graph(Set.of(), GET, FIND);
-        Graph after = graph(Set.of(), GET, FIND, CANCEL);
+        Graph after = graph(Set.of(edge(GET, CANCEL)), GET, FIND, CANCEL);
 
         String md = render(before, after);
 
@@ -147,8 +148,12 @@ class MermaidRendererTest {
     void 기능_subgraph_전용_노드는_레이어_subgraph_에서_빠짐() {
         Node cancelController = new Node("shop.OrderController#cancel/1", "shop.OrderController", "cancel",
                 Layer.CONTROLLER, "DELETE /orders/{id}", "1", "shop/OrderController.java");
-        Graph before = graph(Set.of(), GET, FIND);
-        Graph after = graph(Set.of(edge(cancelController, CANCEL)), GET, FIND, cancelController, CANCEL);
+        // 새 엔드포인트가 기존 find 도 부름 — find 는 get 도 부르는 공유 노드라 기능에 안 묶이고 레이어 칸에 남는다
+        // get 은 같은 커밋에서 본문이 바뀌어 컨트롤러 칸에 그려진다
+        Node getChanged = new Node(GET.id(), GET.fqn(), GET.method(), GET.layer(), GET.endpoint(), "2", GET.file());
+        Graph before = graph(Set.of(edge(GET, FIND)), GET, FIND);
+        Graph after = graph(Set.of(edge(GET, FIND), edge(cancelController, CANCEL), edge(cancelController, FIND)),
+                getChanged, FIND, cancelController, CANCEL);
 
         String md = render(before, after);
 
@@ -265,6 +270,57 @@ class MermaidRendererTest {
 
         assertThat(md).contains("shop_OrderController_get_1 --> shop_OrderService_find_1")
                 .doesNotContain(":::").contains("첫 스냅샷");
+    }
+
+    @Test
+    void 변경과_이어지지_않은_노드는_빠지고_생략_개수만() {
+        Graph before = graph(Set.of(edge(GET, FIND)), GET, FIND, CANCEL);
+        Graph after = graph(Set.of(edge(GET, FIND)), GET, service("find", 1, "2"), CANCEL);
+
+        String md = render(before, after);
+
+        // 바뀐 find 와 그 호출자 get 만 — 아무 데도 안 이어진 cancel 은 그림 밖
+        assertThat(md).contains("[\"OrderService.find\"]:::changed")
+                .contains("shop_OrderController_get_1[")
+                .doesNotContain("OrderService.cancel")
+                .contains("변경과 무관한 노드 1개 생략")
+                .as("외 N곳 상자가 없으면 그 스타일도 없음").doesNotContain("classDef more");
+    }
+
+    @Test
+    void 새_호출의_기존_도착점은_그리되_그_호출자는_펼치지_않음() {
+        Graph before = graph(Set.of(edge(GET, FIND)), GET, FIND);
+        Graph after = graph(Set.of(edge(GET, FIND), edge(CANCEL, FIND)), GET, FIND, CANCEL);
+
+        String md = render(before, after);
+
+        // find 는 바뀌지 않았고 새로 불릴 뿐 — 원래 부르던 get 은 이 커밋과 무관
+        assertThat(md).contains("shop_OrderService_find_1[")
+                .doesNotContain("OrderController.get")
+                .contains("변경과 무관한 노드 1개 생략");
+    }
+
+    @Test
+    void 문맥이_상한을_넘으면_외_N곳_상자() {
+        Node target = plain("Target", "run", Layer.INTERNAL);
+        Node changed = new Node(target.id(), target.fqn(), target.method(), target.layer(), null, "2", target.file());
+        Node[] callers = new Node[7];
+        Set<Edge> edges = new java.util.HashSet<>();
+        for (int i = 0; i < callers.length; i++) {
+            callers[i] = plain("C" + i, "run", Layer.ENTRY);
+            edges.add(edge(callers[i], target));
+        }
+        Graph before = graph(edges, Stream.concat(Stream.of(callers), Stream.of(target)).toArray(Node[]::new));
+        Graph after = graph(edges, Stream.concat(Stream.of(callers), Stream.of(changed)).toArray(Node[]::new));
+
+        String md = render(before, after);
+
+        // id 순 앞 5곳만 그리고 나머지 둘은 상자 하나 — 상자로 가는 화살표도 같은 흐름도 안에
+        assertThat(md).contains("app_C0_run_0[").contains("app_C4_run_0[")
+                .doesNotContain("app_C5_run_0").doesNotContain("app_C6_run_0")
+                .contains("    more_in_app_Target_run_0[\"호출자 외 2곳\"]:::more\n")
+                .contains("    more_in_app_Target_run_0 --> app_Target_run_0\n")
+                .contains("변경과 무관한 노드 2개 생략");
     }
 
     static Node plain(String cls, String method, Layer layer) {
