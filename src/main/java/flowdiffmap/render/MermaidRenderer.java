@@ -109,9 +109,9 @@ public final class MermaidRenderer {
         }
         Function<Edge, String> arrow = e -> name.apply(nodes.get(e.from())) + " → " + name.apply(nodes.get(e.to()));
         md.append("| 구분 | 대상 |\n|---|---|\n");
-        featureRows(md, "기능 추가", featureAdded);
+        featureRows(md, "기능 추가", featureAdded, name);
         nodeRows(md, "추가", excludingClaimed(declared(diff.addedNodes(), nodes), claimedNodes), name);
-        featureRows(md, "기능 삭제", featureRemoved);
+        featureRows(md, "기능 삭제", featureRemoved, name);
         nodeRows(md, "삭제", excludingClaimed(declared(diff.removedNodes(), nodes), claimedNodes), name);
         nodeRows(md, "변경", declared(diff.changedNodes(), nodes), name);
         edgeRows(md, "호출 추가", excludingClaimed(diff.addedEdges(), claimedEdges), arrow);
@@ -119,13 +119,18 @@ public final class MermaidRenderer {
         return md.toString();
     }
 
-    /** 엔드포인트 하나 · 거기에만 속하는 다운스트림 노드 전부 — 그림의 기능 subgraph 와 표의 "기능 추가/삭제" 행이 같이 씀. */
+    /** 엔드포인트 또는 진입점 하나 · 거기에만 속하는 다운스트림 노드 전부 — 그림의 기능 subgraph 와 표의 "기능 추가/삭제" 행이 같이 씀. */
     private record Feature(Node entry, List<Node> members) {
+    }
+
+    /** 엔드포인트가 있으면 그대로 · 진입점(main · 리스너 콜백)은 {@code 클래스.메서드} — 같은 콜백 이름을 가진 리스너끼리 구분되게. */
+    private static String label(Feature f, Function<Node, String> name) {
+        return f.entry().endpoint() != null ? escape(f.entry().endpoint()) : name.apply(f.entry());
     }
 
     private static void featureSubgraph(StringBuilder md, Feature f, Function<Node, String> name, GraphDiff diff) {
         md.append("  subgraph F_").append(mermaidId(f.entry().id())).append("[\"")
-                .append(escape(f.entry().endpoint())).append("\"]\n");
+                .append(label(f, name)).append("\"]\n");
         f.members().forEach(n -> nodeLine(md, n, name, diff));
         md.append("  end\n");
     }
@@ -138,11 +143,11 @@ public final class MermaidRenderer {
     }
 
     /**
-     * 새로 생기거나 없어진 엔드포인트에서 그 엔드포인트에만 속하는 다운스트림 노드 · 엣지를 하나로 묶는다.
+     * 새로 생기거나 없어진 엔드포인트 · 진입점에서 거기에만 속하는 다운스트림 노드 · 엣지를 하나로 묶는다.
      * 다른 엔드포인트로 이어지는 노드는 절대 흡수하지 않고, 그 밖의 노드는 들어오는 호출이 전부 이미 이 묶음
      * 안에서 오는 것일 때만(고정점까지 반복) 흡수한다 — 같은 흐름 안에서 두 갈래로 만나는 노드(다이아몬드)는
      * 묶이고, 바깥(다른 흐름 · 손 안 댄 기존 코드)에서도 호출이 들어오는 진짜 공유 노드는 개별 행으로 남는다.
-     * 라벨은 엔드포인트 그대로.
+     * 라벨은 {@link #label}.
      */
     private static List<Feature> featureEntries(Set<String> nodeIds, Set<Edge> edgeSet, Map<String, Node> nodes,
             Set<String> claimedNodes, Set<Edge> claimedEdges) {
@@ -150,7 +155,8 @@ public final class MermaidRenderer {
         Map<String, List<Edge>> byTo = edgeSet.stream().collect(Collectors.groupingBy(Edge::to));
 
         List<Node> entries = nodeIds.stream().sorted().map(nodes::get)
-                .filter(n -> n.layer() == Layer.CONTROLLER && n.endpoint() != null && declared(n)).toList();
+                .filter(n -> (n.layer() == Layer.CONTROLLER && n.endpoint() != null || n.layer() == Layer.ENTRY) && declared(n))
+                .toList();
         Set<String> entryIds = entries.stream().map(Node::id).collect(Collectors.toSet());
 
         List<Feature> result = new ArrayList<>();
@@ -181,8 +187,8 @@ public final class MermaidRenderer {
         return result;
     }
 
-    private static void featureRows(StringBuilder md, String kind, List<Feature> features) {
-        features.forEach(f -> md.append("| ").append(kind).append(" | ").append(escape(f.entry().endpoint())).append(" |\n"));
+    private static void featureRows(StringBuilder md, String kind, List<Feature> features, Function<Node, String> name) {
+        features.forEach(f -> md.append("| ").append(kind).append(" | ").append(label(f, name)).append(" |\n"));
     }
 
     private static List<Node> excludingClaimed(List<Node> targets, Set<String> claimed) {
@@ -246,6 +252,10 @@ public final class MermaidRenderer {
     }
 
     private static String title(Layer layer) {
-        return layer.name().charAt(0) + layer.name().substring(1).toLowerCase(Locale.ROOT);
+        return switch (layer) {
+            case ENTRY -> "진입";
+            case INTERNAL -> "내부";
+            default -> layer.name().charAt(0) + layer.name().substring(1).toLowerCase(Locale.ROOT);
+        };
     }
 }
