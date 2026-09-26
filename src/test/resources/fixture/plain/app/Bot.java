@@ -11,6 +11,11 @@ public class Bot extends TimerTask {
         save();
     }
 
+    @Override
+    public String toString() {
+        return status();
+    }
+
     public String status() {
         return "ok";
     }
