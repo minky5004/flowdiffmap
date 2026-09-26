@@ -87,18 +87,25 @@ public final class Main {
                     changed.add(tree.resolve(path));
                 }
             }
-            // 바뀐 파일을 부르는 파일도 다시 — 호출자 엣지의 대상 id 가 피호출 시그니처(파라미터 타입)를 담는다
-            for (String caller : store.callerFiles(parent, touched)) {
-                if (touched.add(caller)) {
-                    changed.add(srcRoot.resolve(caller));
-                }
-            }
             Graph fresh = EMPTY;
             if (!changed.isEmpty()) {
                 FlowExtractor extractor = new FlowExtractor(srcRoot);
                 fresh = extractor.extract(changed);
                 // 문법 오류 중인 파일은 부모 행을 그대로 — 지우면 그 파일 메서드가 전부 삭제로 칠해진다
-                touched.removeAll(extractor.unparsed());
+                Set<String> unparsed = extractor.unparsed();
+                touched.removeAll(unparsed);
+
+                // 바뀐 파일을 부르는 파일도 다시 — 호출자 엣지의 대상 id 가 피호출 시그니처(파라미터 타입)를 담아서,
+                // 부모 행을 복사하면 시그니처만 바뀐 커밋에 사라진 id 를 가리킨다. 읽지 못한 파일의 호출자는 빼고
+                // 부모 행을 둔다 — 솔버가 그 파일을 못 풀어 호출자 엣지가 통째로 빠진다
+                Set<String> callers = new HashSet<>(store.callerFiles(parent, touched));
+                callers.removeAll(store.callerFiles(parent, unparsed));
+                callers.removeAll(unparsed);
+                if (!callers.isEmpty()) {
+                    touched.addAll(callers);
+                    callers.forEach(caller -> changed.add(srcRoot.resolve(caller)));
+                    fresh = new FlowExtractor(srcRoot).extract(changed);
+                }
             }
             store.saveIncremental(parent, sha, touched, fresh);
             if (touched.isEmpty()) {
