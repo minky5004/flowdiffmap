@@ -8,9 +8,13 @@
 
 초록 추가 · 빨강 점선 삭제 · 노랑 본문 변경 — **[산출물 원본](docs/example/request-flow.md)** (Mermaid + 변경 표) · [fixture](src/test/resources/fixture) v1 → v2 두 커밋의 임시 리포 산출물
 
+[![/help 리스너 추가 커밋의 흐름도](docs/example/discord-bot-flow.png)](docs/example/discord-bot-flow.md)
+
+비-Spring 리포 — [DiscordBotPractice](https://github.com/minky5004/DiscordBotPractice) 의 `/help` 추가 커밋 [`84a7d6a`](https://github.com/minky5004/DiscordBotPractice/commit/84a7d6a) · 노드 47개 중 이 커밋에 걸린 8개만 — **[산출물 원본](docs/example/discord-bot-flow.md)**
+
 ## 주요 기능
 
-- 레이어 나열 대신 새·삭제 엔드포인트별 기능 단위 박스 · 범례
+- 전체 그래프 대신 바뀐 노드 · 한 단계 이웃뿐인 그림 · 새·삭제 엔드포인트별 기능 박스 · 범례 — 5곳 넘는 이웃은 `외 N곳` 상자
 - 어노테이션 없는 리포용 main · 리스너 콜백 기점 흐름도 — 호출이 닿는 클래스만
 - 작업 폴더가 아닌 커밋된 blob 기준 · 바뀐 파일만 다시 파싱한 커밋별 PostgreSQL 스냅샷 — `git add -p` 부분 커밋에도 어긋나지 않는 흐름
 - 문서 · DTO 만 바뀐 커밋에 덮이지 않는 직전 흐름도

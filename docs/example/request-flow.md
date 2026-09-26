@@ -1,4 +1,4 @@
-# 요청 흐름 · `9c75e52`
+# 요청 흐름 · `72603a5`
 
 ```mermaid
 flowchart LR
@@ -26,7 +26,6 @@ flowchart LR
   end
   subgraph REPOSITORY["Repository"]
     shop_order_OrderRepository_findById_1["OrderRepository.findById"]
-    shop_order_OrderRepository_findByStatus_1["OrderRepository.findByStatus"]
   end
     shop_order_OrderController_cancel_1 --> shop_order_OrderService_cancel_1
     shop_order_OrderController_create_1 --> shop_order_OrderService_create_1
@@ -44,6 +43,8 @@ flowchart LR
   classDef removed fill:#fdd,stroke:#d33,stroke-dasharray:4
   classDef changed fill:#fe8,stroke:#c90
 ```
+
+변경과 무관한 노드 1개 생략
 
 | 구분 | 대상 |
 |---|---|
