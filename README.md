@@ -21,12 +21,14 @@
 | 단계 | 하는 일 | 산출물 |
 | --- | --- | --- |
 | 풀기 | 커밋 blob 을 임시 폴더로 — 작업 폴더 아닌 커밋 내용 | 커밋 시점 `src/main/java` |
-| 추출 | 바뀐 파일 + 그 파일을 부르는 파일만 파싱 · 레이어 · 진입점 판별 · 호출 resolve | 노드 · 엣지 |
+| 추출 | 바뀐 파일 + 그 파일을 부르는 파일 파싱(베이스라인 커밋은 전체) · 레이어 · 진입점 판별 · 호출 resolve | 노드 · 엣지 |
 | 저장 | 부모 스냅샷 복사 + 바뀐 파일 행만 교체 · 부모 스냅샷 없는 커밋의 전체 베이스라인 | PostgreSQL 커밋별 스냅샷 |
 | 비교 | 부모 대비 추가 · 삭제 · 본문 변경 | diff |
-| 렌더 | 바뀐 노드 + 한 단계 이웃(방향마다 5곳 · 넘친 이웃은 `외 N곳` 상자) · 엔드포인트별 기능 박스 · 범례 | `docs/flow/request-flow.md` |
+| 렌더 | 바뀐 노드 + 한 단계 이웃(방향마다 5곳 · 넘친 이웃은 `외 N곳` 상자) · 추가 · 삭제된 엔드포인트 · 진입점의 기능 박스 · 범례 | `docs/flow/request-flow.md` |
 
-커밋된 blob 기준의 스냅샷 — `git add -p` 부분 커밋에도 어긋나지 않는 흐름 · 흐름 그대로인 커밋(문서 · DTO 만)에 덮이지 않는 직전 흐름도
+커밋된 blob 기준의 스냅샷 — `git add -p` 부분 커밋에도 어긋나지 않는 흐름
+
+흐름 diff 없는 커밋(문서 · 흐름 밖 클래스만)에 덮이지 않는 직전 흐름도
 
 부모 커밋 흐름을 이어받는 문법 오류 파일 · 경고는 `.git/flowdiffmap.log`
 
@@ -50,10 +52,10 @@ Git Bash 기준 · JDK 21 · Docker 필요
 git clone https://github.com/minky5004/flowdiffmap.git && cd flowdiffmap
 docker compose up -d                  # PostgreSQL → localhost:5432 · PC 부팅 뒤 한 번
 ./gradlew installDist                 # → build/install/flowdiffmap · flowdiffmap 코드 수정 뒤에도
-hooks/install.sh /path/to/java-repo   # 대상 리포마다 한 번 · 배포본 경로를 박은 post-commit 훅 · 기존 훅 보존
+hooks/install.sh /path/to/java-repo   # 대상 리포마다 한 번 · 배포본 경로를 박은 post-commit 훅 · 남의 훅을 덮지 않는 설치
 ```
 
-이후 대상 리포 커밋마다 `docs/flow/request-flow.md` 갱신 · 추적 안 된 파일로 남는 출력 — 훅 설치 뒤 첫 커밋의 전체 그림 · 그다음부터 바뀐 부분만 칠한 그림
+이후 대상 리포 커밋마다 `docs/flow/request-flow.md` 갱신 · 추적 안 된 파일로 남는 출력 — 훅 설치 뒤 첫 커밋 · DB 꺼진 커밋 바로 다음 커밋의 전체 그림 · 그 밖의 커밋은 바뀐 부분만 칠한 그림
 
 재설치 대상 — 다른 PC 의 clone · flowdiffmap 폴더 이동 뒤의 대상 리포 (커밋 안 되는 `.git/hooks` 안 훅 · 훅에 박힌 배포본 경로)
 
@@ -67,7 +69,7 @@ flowdiffmap/
 ├── docker-compose.yml         로컬 PostgreSQL 17
 ├── hooks/
 │   ├── post-commit            훅 스크립트 · 실패해도 종료 코드 0
-│   └── install.sh             배포본 경로가 박힌 훅의 설치 · 남의 훅 보존
+│   └── install.sh             배포본 경로를 박은 훅 · 남의 훅을 덮지 않는 설치 스크립트
 └── src/main/
     ├── resources/schema.sql   스냅샷 테이블 · CREATE TABLE IF NOT EXISTS
     └── java/flowdiffmap/
