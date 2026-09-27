@@ -37,12 +37,16 @@ Git Bash 기준 · JDK 21 · Docker 필요
 
 ```bash
 git clone https://github.com/minky5004/flowdiffmap.git && cd flowdiffmap
-docker compose up -d                                        # PostgreSQL → localhost:5432
-./gradlew installDist                                       # → build/install/flowdiffmap
-hooks/install.sh /path/to/java-repo                         # 배포본 경로를 박은 post-commit 훅 · 기존 훅 보존
+docker compose up -d                  # PostgreSQL → localhost:5432 · PC 부팅 뒤 한 번
+./gradlew installDist                 # → build/install/flowdiffmap · flowdiffmap 코드 수정 뒤에도
+hooks/install.sh /path/to/java-repo   # 대상 리포마다 한 번 · 배포본 경로를 박은 post-commit 훅 · 기존 훅 보존
 ```
 
 이후 대상 리포 커밋마다 `docs/flow/request-flow.md` 갱신 · 추적 안 된 파일로 남는 출력
+
+- 첫 커밋의 전체 그림 · 두 번째 커밋부터 바뀐 부분만 칠한 그림
+- 재설치 대상 — 다른 PC 의 clone · flowdiffmap 폴더 이동 뒤의 대상 리포 (커밋 안 되는 `.git/hooks` 안 훅 · 훅에 박힌 배포본 경로)
+- 흐름도 안 생긴 커밋의 단서 `.git/flowdiffmap.log` — 대개 꺼진 DB
 
 ## 구조
 
