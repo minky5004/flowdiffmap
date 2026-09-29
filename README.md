@@ -6,7 +6,7 @@
 
 > 부모 커밋 대비 바뀐 메서드 · 호출만 칠한 Java 흐름도(Spring Boot 는 Controller → Service → Repository · 그 밖은 main · 리스너 진입점부터)를 커밋마다 쓰는 post-commit 훅
 
-멀티모듈 지원 — 루트 · 빌드 파일 옆 `src/main/java` · 앱 실행 없는 소스 정적 분석 · 결과 파일 쓰기까지만 · 커밋은 사람 몫 — 훅 커밋 → 훅 재실행 루프 회피
+루트 · 빌드 파일 옆 모든 `src/main/java` 대상(멀티모듈) · 앱 실행 없는 소스 정적 분석 · 결과 파일 쓰기까지만 · 커밋은 사람 몫 — 훅 커밋 → 훅 재실행 루프 회피
 
 [![주문 생성 → 주문 취소 교체 커밋의 흐름도](docs/example/request-flow.png)](docs/example/request-flow.md)
 
@@ -41,7 +41,7 @@
 | 정적 분석 | JavaParser 3.28 symbol solver — 앱 실행 없이 호출 대상 resolve |
 | Database | PostgreSQL 17 · JDBC 직접 (ORM · Flyway 없음 · `schema.sql` 한 장) |
 | git | `git` CLI 호출 (JGit 없음) · blob 은 `cat-file --batch` 한 프로세스로 |
-| Test | JUnit 6 · AssertJ · Testcontainers 2 · 60개 |
+| Test | JUnit 6 · AssertJ · Testcontainers 2 · 62개 |
 | CI | GitHub Actions |
 
 ## 실행
@@ -73,8 +73,8 @@ flowdiffmap/
 └── src/main/
     ├── resources/schema.sql   스냅샷 테이블 · CREATE TABLE IF NOT EXISTS
     └── java/flowdiffmap/
-        ├── Main.java          훅 진입점 · 커밋 blob 풀기 · 부모 대비 비교
-        ├── ast/               Spring 레이어 · 진입점 판별 · 매핑 · 호출 엣지 추출
+        ├── Main.java          훅 진입점 · 모듈별 소스 루트 탐지 · 커밋 blob 풀기 · 부모 대비 비교
+        ├── ast/               Spring 레이어 · 진입점 판별 · 매핑 · 모듈 넘는 호출 엣지 추출
         ├── graph/             노드 · 엣지 그래프 · 두 커밋 사이 diff
         ├── store/             커밋별 스냅샷 저장 · 부모 행 복사 + 바뀐 파일만 교체 · 읽을 때 진입점 도달 필터
         └── render/            Mermaid 흐름도 + 변경 표
