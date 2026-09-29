@@ -131,6 +131,7 @@ class PipelineTest {
         Main.run(repo, store);
         Path web = repo.resolve("web/src/main/java/web/StatusController.java");
         Files.createDirectories(web.getParent());
+        Files.writeString(repo.resolve("web/build.gradle"), "");
         Files.writeString(web, """
                 package web;
                 @org.springframework.web.bind.annotation.RestController
@@ -161,6 +162,38 @@ class PipelineTest {
 
         assertThat(store.load(head()).orElseThrow().edges()).extracting(e -> e.from() + " -> " + e.to())
                 .contains("web.StatusController#status() -> shop.order.OrderService#find(Number)");
+    }
+
+    @Test
+    void 루트_모듈_없이_하위_모듈만_있는_리포도_그리고_빌드_파일_없는_폴더는_모듈이_아님() throws Exception {
+        write("pipeline/build.gradle", "");
+        write("pipeline/src/main/java/app/Job.java", """
+                package app;
+                class Job {
+                    public static void main(String[] args) {
+                    }
+                }
+                """);
+        write("examples/src/main/java/demo/Sample.java", """
+                package demo;
+                class Sample {
+                    public static void main(String[] args) {
+                    }
+                }
+                """);
+        git("add", "-A");
+        git("commit", "-qm", "pipeline only");
+
+        Main.run(repo, store);
+
+        assertThat(store.load(head()).orElseThrow().nodes().values()).extracting(n -> n.file())
+                .containsExactly("pipeline/app/Job.java");
+    }
+
+    void write(String rel, String content) throws IOException {
+        Path file = repo.resolve(rel);
+        Files.createDirectories(file.getParent());
+        Files.writeString(file, content);
     }
 
     @Test

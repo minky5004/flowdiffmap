@@ -19,12 +19,12 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Objects;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 import java.util.TreeSet;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-import java.util.Set;
 import java.util.stream.Stream;
 
 /**
@@ -35,6 +35,7 @@ public final class Main {
 
     /** 모듈 접두(그룹 1 · 루트 모듈은 없음) + 소스 루트 아래 상대 경로(그룹 2) — 멀티모듈은 디렉터리 관례로만 찾는다. */
     private static final Pattern SOURCE = Pattern.compile("^(.*/)?src/main/java/(.+\\.java)$");
+    private static final Set<String> BUILD_FILES = Set.of("build.gradle", "build.gradle.kts", "pom.xml");
     static final String OUT = "docs/flow/request-flow.md";
     private static final Graph EMPTY = new Graph(Map.of(), Set.of(), Set.of());
 
@@ -133,7 +134,9 @@ public final class Main {
     private static Set<String> checkout(Path repo, String sha, Path dir) throws IOException, InterruptedException {
         // ls-tree -z: "모드 blob 오브젝트id\t경로\0"
         List<String[]> blobs = new ArrayList<>();
-        Set<String> modules = new TreeSet<>();
+        Set<String> sourceDirs = new TreeSet<>();
+        Set<String> buildDirs = new HashSet<>();
+        // ls-tree 는 glob pathspec 을 못 받는다 — 전체 목록을 받아 거른다
         for (String entry : git(repo, "ls-tree", "-r", "-z", sha).split("\0")) {
             int tab = entry.indexOf('\t');
             String[] meta = entry.substring(0, Math.max(tab, 0)).split(" ");
@@ -141,9 +144,15 @@ public final class Main {
             Matcher m = SOURCE.matcher(path);
             if (meta.length == 3 && meta[1].equals("blob") && m.matches()) {
                 blobs.add(new String[] {meta[2], path});
-                modules.add(Objects.toString(m.group(1), ""));
+                sourceDirs.add(Objects.toString(m.group(1), ""));
+            } else if (meta.length == 3 && BUILD_FILES.contains(path.substring(path.lastIndexOf('/') + 1))) {
+                buildDirs.add(path.substring(0, path.lastIndexOf('/') + 1));
             }
         }
+        // 루트는 빌드 파일 없이도 소스 루트(지금까지의 동작) · 그 밖은 빌드 파일 옆이어야 모듈 — 예제 · 픽스처 폴더가 안 섞이게
+        Set<String> modules = new TreeSet<>(sourceDirs);
+        modules.removeIf(m -> !m.isEmpty() && !buildDirs.contains(m));
+        blobs.removeIf(b -> !modules.contains(moduleOf(b[1])));
         if (blobs.isEmpty()) {
             return modules;
         }
@@ -176,6 +185,11 @@ public final class Main {
             throw new IllegalStateException("git cat-file --batch 실패 (종료 코드 " + p.exitValue() + ")");
         }
         return modules;
+    }
+
+    private static String moduleOf(String path) {
+        Matcher m = SOURCE.matcher(path);
+        return m.matches() ? Objects.toString(m.group(1), "") : "";
     }
 
     private static String line(InputStream in) throws IOException {
