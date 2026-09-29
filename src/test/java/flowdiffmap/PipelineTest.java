@@ -126,6 +126,77 @@ class PipelineTest {
     }
 
     @Test
+    void 다른_모듈의_호출도_엣지로_이어지고_시그니처_변경에_호출자가_다시_읽힘() throws Exception {
+        commit("v1");
+        Main.run(repo, store);
+        Path web = repo.resolve("web/src/main/java/web/StatusController.java");
+        Files.createDirectories(web.getParent());
+        Files.writeString(repo.resolve("web/build.gradle"), "");
+        Files.writeString(web, """
+                package web;
+                @org.springframework.web.bind.annotation.RestController
+                class StatusController {
+                    shop.order.OrderService orders;
+                    @org.springframework.web.bind.annotation.GetMapping("/status")
+                    void status() {
+                        orders.find(1L);
+                    }
+                }
+                """);
+        git("add", "-A");
+        git("commit", "-qm", "web module");
+
+        Main.run(repo, store);
+
+        var g = store.load(head()).orElseThrow();
+        assertThat(g.nodes().get("web.StatusController#status()").file()).isEqualTo("web/web/StatusController.java");
+        assertThat(g.edges()).extracting(e -> e.from() + " -> " + e.to())
+                .contains("web.StatusController#status() -> shop.order.OrderService#find(Long)");
+
+        // 다른 모듈 파일은 안 건드리는 커밋 — 호출자가 모듈 접두로 다시 읽혀야 새 시그니처를 가리킴
+        Path service = src("shop/order/OrderService.java");
+        Files.writeString(service, Files.readString(service).replace("public Order find(Long id)", "public Order find(Number id)"));
+        git("commit", "-qam", "widen");
+
+        Main.run(repo, store);
+
+        assertThat(store.load(head()).orElseThrow().edges()).extracting(e -> e.from() + " -> " + e.to())
+                .contains("web.StatusController#status() -> shop.order.OrderService#find(Number)");
+    }
+
+    @Test
+    void 루트_모듈_없이_하위_모듈만_있는_리포도_그리고_빌드_파일_없는_폴더는_모듈이_아님() throws Exception {
+        write("pipeline/build.gradle", "");
+        write("pipeline/src/main/java/app/Job.java", """
+                package app;
+                class Job {
+                    public static void main(String[] args) {
+                    }
+                }
+                """);
+        write("examples/src/main/java/demo/Sample.java", """
+                package demo;
+                class Sample {
+                    public static void main(String[] args) {
+                    }
+                }
+                """);
+        git("add", "-A");
+        git("commit", "-qm", "pipeline only");
+
+        Main.run(repo, store);
+
+        assertThat(store.load(head()).orElseThrow().nodes().values()).extracting(n -> n.file())
+                .containsExactly("pipeline/app/Job.java");
+    }
+
+    void write(String rel, String content) throws IOException {
+        Path file = repo.resolve(rel);
+        Files.createDirectories(file.getParent());
+        Files.writeString(file, content);
+    }
+
+    @Test
     void 커밋하지_않은_작업_폴더_변경은_스냅샷에_안_들어감() throws Exception {
         commit("v1");
         Main.run(repo, store);

@@ -37,6 +37,7 @@ import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.HexFormat;
@@ -68,7 +69,11 @@ public class FlowExtractor {
 
     private static final Set<String> OBJECT_METHODS = Set.of("equals", "hashCode", "toString");
 
-    private final Path srcRoot;
+    /** 소스 루트 하나 — {@code prefix} 는 리포 루트 기준 모듈 디렉터리({@code ""} · {@code "pipeline/"}) · {@link Node#file()} 의 앞부분. */
+    private record Root(Path dir, String prefix) {
+    }
+
+    private final List<Root> roots;
     private final JavaParser parser;
     private final Set<String> unparsed = new HashSet<>();
     private final DefaultPrettyPrinter declarationPrinter = new DefaultPrettyPrinter(new DefaultPrinterConfiguration()
@@ -76,11 +81,34 @@ public class FlowExtractor {
             .removeOption(new DefaultConfigurationOption(ConfigOption.PRINT_JAVADOC)));
 
     public FlowExtractor(Path srcRoot) {
-        this.srcRoot = srcRoot.toAbsolutePath().normalize();
-        var typeSolver = new TypeSolverBuilder().withCurrentJRE().withSourceCode(this.srcRoot).build();
+        this(List.of(new Root(srcRoot.toAbsolutePath().normalize(), "")));
+    }
+
+    /**
+     * 멀티모듈 — {@code tree} 아래 {@code modules}({@code ""} · {@code "pipeline/"})의 {@code src/main/java} 전부를
+     * 타입 솔버에 넣어 모듈 간 호출도 잇는다. 루트 모듈은 접두가 없어 단일 모듈 때와 {@link Node#file()} 이 같다.
+     */
+    public FlowExtractor(Path tree, Collection<String> modules) {
+        this(modules.stream()
+                .map(m -> new Root(tree.resolve(m + "src/main/java").toAbsolutePath().normalize(), m))
+                .toList());
+    }
+
+    private FlowExtractor(List<Root> roots) {
+        this.roots = roots;
+        var builder = new TypeSolverBuilder().withCurrentJRE();
+        roots.forEach(r -> builder.withSourceCode(r.dir()));
         this.parser = new JavaParser(new ParserConfiguration()
                 .setLanguageLevel(LanguageLevel.JAVA_25)
-                .setSymbolResolver(new JavaSymbolSolver(typeSolver)));
+                .setSymbolResolver(new JavaSymbolSolver(builder.build())));
+    }
+
+    /** {@link Node#file()} 형식의 경로를 실제 파일로 — 어느 모듈인지는 접두로. */
+    public Path resolve(String file) {
+        return roots.stream().filter(r -> file.startsWith(r.prefix()))
+                .max(Comparator.comparingInt(r -> r.prefix().length()))
+                .map(r -> r.dir().resolve(file.substring(r.prefix().length())))
+                .orElseThrow(() -> new IllegalArgumentException("소스 루트 밖: " + file));
     }
 
     /** 파싱에 실패한 파일은 경고만 남기고 건너뛴다 — 목록은 {@link #unparsed()}. */
@@ -91,11 +119,12 @@ public class FlowExtractor {
         Set<Component> components = new HashSet<>();
         for (Path file : files) {
             Path abs = file.toAbsolutePath().normalize();
-            if (!abs.startsWith(srcRoot)) {
+            Optional<Root> root = roots.stream().filter(r -> abs.startsWith(r.dir())).findFirst();
+            if (root.isEmpty()) {
                 System.err.println("[flowdiffmap] 소스 루트 밖 · 건너뜀: " + file);
                 continue;
             }
-            String rel = srcRoot.relativize(abs).toString().replace('\\', '/');
+            String rel = root.get().prefix() + root.get().dir().relativize(abs).toString().replace('\\', '/');
             Optional<CompilationUnit> cu = parse(abs);
             if (cu.isEmpty()) {
                 unparsed.add(rel);
